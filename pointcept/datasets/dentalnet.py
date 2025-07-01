@@ -156,13 +156,13 @@ class DentalDataset(Dataset):
             "point_label_onehot": one_hot,          # (N,6) float32
 
             # Five clinical targets, each shape (1,) int64
-            "label_right":      np.array([lbl_right],  dtype=np.int64),
-            "label_left":       np.array([lbl_left],   dtype=np.int64),
-            "label_anterior":   np.array([lbl_ant],    dtype=np.int64),
-            "label_transverse": np.array([lbl_trans],  dtype=np.int64),
-            "label_midline":    np.array([lbl_mid],    dtype=np.int64),
+            "label_0":      np.array([lbl_right],  dtype=np.int64),
+            "label_1":       np.array([lbl_left],   dtype=np.int64),
+            "label_2":   np.array([lbl_ant],    dtype=np.int64),
+            "label_3": np.array([lbl_trans],  dtype=np.int64),
+            "label_4":    np.array([lbl_mid],    dtype=np.int64),
 
-            # convenience vector for downstream evaluation (no updates to test pipeline)
+            # convenience vector for downstream evaluation (to avoid updates to test pipeline)
             "category": np.array(
                 [lbl_right, lbl_left, lbl_ant, lbl_trans, lbl_mid], dtype=np.int64
             ),
