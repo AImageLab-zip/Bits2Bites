@@ -274,7 +274,7 @@ class LandmarkFilter:
         return filtered_landmarks_by_instance
     
     def filter_landmarks(self, landmarks_file: str, segmentation_file: str, 
-                        output_landmarks_file: str, output_segmentation_file: str,
+                        output_landmarks_file: str, # output_segmentation_file: str,
                         mesh_vertices: Optional[List[List[float]]] = None) -> Tuple[int, int]:
         """
         Filter landmarks and segmentation data to keep only valid points.
@@ -361,7 +361,7 @@ class LandmarkFilter:
         
         # Save filtered data
         self.save_json(filtered_landmarks_data, output_landmarks_file)
-        self.save_json(filtered_segmentation_data, output_segmentation_file)
+        # self.save_json(filtered_segmentation_data, output_segmentation_file)
         
         original_count = len(original_landmarks)
         filtered_count = len(filtered_landmarks)
@@ -381,8 +381,8 @@ class LandmarkFilter:
         return original_count, filtered_count
     
     def batch_filter(self, input_dir: str, output_dir: str, 
-                    landmarks_suffix: str = '_landmarks.json', 
-                    segmentation_suffix: str = '_segmentation.json') -> None:
+                    landmarks_suffix: str = '__kpt.json', 
+                    segmentation_suffix: str = '.json') -> None:
         """
         Batch process multiple landmark and segmentation file pairs.
         """
@@ -406,13 +406,15 @@ class LandmarkFilter:
                 continue
             
             # Create output file names
-            output_landmarks = output_path / f"{base_name}_filtered{landmarks_suffix}"
-            output_segmentation = output_path / f"{base_name}_filtered{segmentation_suffix}"
+            trailer = f"{base_name}_filtered_landmarks.json"
+            # trailer_segmentation = f"{base_name}_filtered_segmentation.json"
+            output_landmarks = output_path / trailer[5:]
+            # output_segmentation = output_path / f"{base_name}_filtered_segmentation.json"
             
             print(f"\nProcessing: {landmark_file.name}")
             orig, filt = self.filter_landmarks(
                 str(landmark_file), str(segmentation_file),
-                str(output_landmarks), str(output_segmentation)
+                str(output_landmarks) #, str(output_segmentation)
             )
             
             total_original += orig
@@ -428,13 +430,18 @@ def merge_upper_lower(input_dir, merged_output_dir):
     merged_output_dir = Path(merged_output_dir)
     merged_output_dir.mkdir(parents=True, exist_ok=True)
 
-    upper_files = sorted(input_dir.glob("*_upper_filtered_landmarks.json"))
+    upper_files = sorted(input_dir.glob("upper_*_filtered_landmarks.json"))
 
     for upper_file in upper_files:
-        base = upper_file.name.replace("_upper_filtered_landmarks.json", "")
-        lower_file = input_dir / f"{base}_lower_filtered_landmarks.json"
+        if(len(upper_file.name) == 32):
+            id = int(upper_file.name[6:8])
+        elif(len(upper_file.name) == 33):
+            id = int(upper_file.name[6:9])
+        else:
+            id = int(upper_file.name[6])
+        lower_file = input_dir / f"lower_{id}_filtered_landmarks.json"
         if not lower_file.exists():
-            print(f"Skipping {base}: no matching lower file found")
+            print(f"Skipping lower_{id}_filtered_landmarks.json: no matching lower file found")
             continue
 
         with open(upper_file) as f:
@@ -445,11 +452,11 @@ def merge_upper_lower(input_dir, merged_output_dir):
         merged_data = {
             "version": "1.1",
             "description": "landmarks",
-            "key": f"dental_{base}",
+            "key": f"dental_{id}",
             "objects": upper_data["objects"] + lower_data["objects"]
         }
 
-        with open(merged_output_dir / f"dental_{base}.json", "w") as out:
+        with open(merged_output_dir / f"dental_{id}.json", "w") as out:
             json.dump(merged_data, out, indent=2)
 
 def train_test_split(json_dir, output_dir, train_ratio=0.8):
