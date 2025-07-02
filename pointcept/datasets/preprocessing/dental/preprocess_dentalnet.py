@@ -477,24 +477,26 @@ def train_test_split(json_dir, output_dir, train_ratio=0.8):
 
 def process_labels(xlsx_file, output_csv):
     df = pd.read_excel(xlsx_file, header=None)
-    df.columns = df.iloc[0]
-    df = df[1:].reset_index(drop=True)  # remove colums names row
+
+    df.columns = df.iloc[0].fillna("")
+    df = df.iloc[1:].reset_index(drop=True)
+    df = df.loc[:, df.columns.notna()]
 
     # Normalize class columns
-    df["CLASSE DX"] = df["CLASSE DX"].replace({
-        "Seconda Classe Testa a Testa": "Seconda Classe",
-        "Seconda Classe Piena": "Seconda Classe"
+    df["CLASSE DX"] = df["CLASSE DX"].astype(str).str.lower().replace({
+        "seconda classe testa a testa": "Seconda Classe",
+        "seconda classe piena": "Seconda Classe"
     })
-    df["CLASSE SX"] = df["CLASSE SX"].replace({
-        "Seconda Classe Testa a Testa": "Seconda Classe",
-        "Seconda Classe Piena": "Seconda Classe"
+    df["CLASSE SX"] = df["CLASSE SX"].astype(str).str.lower().replace({
+        "seconda classe testa a testa": "Seconda Classe",
+        "seconda classe piena": "Seconda Classe"
     })
 
     # Normalize morso anteriore
-    df["MORSO ANTERIORE"] = df["MORSO ANTERIORE"].replace({
-        "Morso Profondo": "Profondo",
-        "Morso Aperto": "Aperto",
-        "Morso Inverso": "Inverso"
+    df["MORSO ANTERIORE"] = df["MORSO ANTERIORE"].astype(str).str.lower().replace({
+        "morso profondo": "Profondo",
+        "morso aperto": "Aperto",
+        "morso inverso": "Inverso"
     })
 
     # Drop TRASVERSALE and shift columns left
@@ -502,10 +504,11 @@ def process_labels(xlsx_file, output_csv):
     df.columns = [c for c in df.columns if pd.notna(c)]
 
     # Normalize TRASVERSALE (senza id denti)
-    df["TRASVERSALE (senza id denti)"] = df["TRASVERSALE (senza id denti)"].replace({
-        "Cross Bite": "Cross",
-        "Scissor Bite": "Scissor",
-        "Cross Bite / Scissor Bite": "Cross"
+    df["TRASVERSALE (senza id denti)"] = df["TRASVERSALE (senza id denti)"].astype(str).str.lower().replace({
+        "cross bite": "Cross",
+        "scissor bite": "Scissor",
+        "cross bite / scissor bite": "Cross",
+        "scissor bite / cross bite": "Scissor"
     })
 
     df.to_csv(output_csv, index=False)
