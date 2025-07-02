@@ -16,6 +16,9 @@ from .semantic_kitti import SemanticKITTIDataset
 from .nuscenes import NuScenesDataset
 from .waymo import WaymoDataset
 
+# Custom dental dataset
+from .dental import DentalDataset
+
 # object
 from .modelnet import ModelNetDataset
 from .shapenet_part import ShapeNetPartDataset
