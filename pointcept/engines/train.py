@@ -253,6 +253,7 @@ class Trainer(TrainerBase):
             tag, name = Path(self.cfg.save_path).parts[-2:]
             wandb.init(
                 project=self.cfg.wandb_project,
+                entity=self.cfg.wandb_entity,
                 name=f"{tag}/{name}",
                 tags=[tag],
                 dir=self.cfg.save_path,
