@@ -1,7 +1,14 @@
 _base_ = ["../_base_/default_runtime.py"]
 
+import os
+
+wandb_project = os.environ.get('WANDB_PROJECT')
+wandb_key = os.environ.get('WANDB_KEY')
+wandb_entity = os.environ.get('WANDB_ENTITY')
+
 batch_size = 16            # adjust
 epoch = 250
+eval_epoch = 250
 empty_cache = False
 enable_amp = True
 
@@ -75,12 +82,13 @@ model = dict(
     embed_dim=512,                          # Point-Transformer v3 default
     num_classes_list=num_classes_list,
     loss_type="ce",
+    #backbone_embed_dim=512,
     backbone=dict(                          #  Backbone: Point Transformer V3 (v1m1) and multi-task dental data
         type="PT-v3m1",                     # as in cls-ptv3-v1m1-0-base
         in_channels=9,                      # 3 xyz + 6 one-hot features
-        embed_dim=512,
-        depth=12,
-        drop_path_rate=0.1,
+        #embed_dim=512,
+        #depth=12,
+        #drop_path_rate=0.1,
         cls_mode=True,
     ),
 )
