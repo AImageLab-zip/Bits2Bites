@@ -28,10 +28,10 @@ POINT_CLASSES = [
 ]
 POINT_CLASS_TO_IDX = {c: i for i, c in enumerate(POINT_CLASSES)}
 
-RIGHT_LEFT_CLASSES = ["Prima Classe", "Seconda Classe", "Terza Classe"]
-ANTERIOR_CLASSES   = ["Normale", "Profondo", "Aperto", "Inverso"]
-TRANSVERSE_CLASSES = ["Normale", "Scrissor", "Cross"]
-MIDLINE_CLASSES    = ["Centrata", "Deviata"]
+RIGHT_LEFT_CLASSES = ["prima classe", "seconda classe", "terza classe"]
+ANTERIOR_CLASSES   = ["normale", "profondo", "aperto", "inverso"]
+TRANSVERSE_CLASSES = ["normale", "scissor", "cross"]
+MIDLINE_CLASSES    = ["centrata", "deviata"]
 
 STRING2IDX = {
     "right":      {c: i for i, c in enumerate(RIGHT_LEFT_CLASSES)},
@@ -55,7 +55,7 @@ class DentalDataset(Dataset):
         │     └── ...
         └── labels.csv            ← six clinical columns
 
-    The CSV (no header) columns are:
+    The CSV columns are:
         id, right, left, anterior, transverse, midline
     """
 
@@ -79,7 +79,7 @@ class DentalDataset(Dataset):
         self.json_dir = self.data_root / self.split
         if label_csv is None:
             label_csv = self.data_root / "labels.csv"
-        self.labels_df = pd.read_csv(label_csv, header=None, dtype=str)
+        self.labels_df = pd.read_csv(label_csv, dtype=str)
 
         self.num_points = num_points
         self.uniform_sampling = uniform_sampling
