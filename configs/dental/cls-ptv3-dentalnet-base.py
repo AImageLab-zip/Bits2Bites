@@ -6,7 +6,8 @@ wandb_project = os.environ.get('WANDB_PROJECT')
 wandb_key = os.environ.get('WANDB_KEY')
 wandb_entity = os.environ.get('WANDB_ENTITY')
 
-batch_size = 16            # adjust
+batch_size = 16            # to adjust
+batch_size_val = 16
 epoch = 250
 eval_epoch = 250
 empty_cache = False
@@ -40,7 +41,7 @@ data = dict(
     ),
     val=dict(
         type=dataset_type,
-        split="val",       # or "test" if you have only train/test
+        split="val",
         data_root=data_root,
         transform=[
             dict(type="NormalizeCoord"),
@@ -82,26 +83,22 @@ model = dict(
     embed_dim=512,                          # Point-Transformer v3 default
     num_classes_list=num_classes_list,
     loss_type="ce",
-    #backbone_embed_dim=512,
     backbone=dict(                          #  Backbone: Point Transformer V3 (v1m1) and multi-task dental data
         type="PT-v3m1",                     # as in cls-ptv3-v1m1-0-base
         in_channels=9,                      # 3 xyz + 6 one-hot features
-        #embed_dim=512,
-        #depth=12,
-        #drop_path_rate=0.1,
+        enable_flash=False,                 # True if AMPERE gpu arch
         cls_mode=True,
     ),
 )
 
 optimizer = dict(type="AdamW", lr=6e-4, weight_decay=0.01)
-scheduler = dict(type="CosineAnnealingLR", T_max=epoch)
+scheduler = dict(type="CosineAnnealingLR", total_steps=epoch)
 
 hooks = [
     dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
-    dict(type="InformationWriter"),
-    dict(type="BestCkptSaver", metric="loss/val"),   # restore best weight ?
-    dict(type="ClsEvaluator"),
+    #dict(type="InformationWriter"),
+    #dict(type="ClsEvaluator"),
     dict(type="PreciseEvaluator", test_last=False),
 ]
 
