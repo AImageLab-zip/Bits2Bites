@@ -24,6 +24,7 @@ class MultiTaskClassifier(nn.Module):
 
         self.backbone = build_model(backbone)
         self.num_tasks = len(num_classes_list)
+        self.num_classes_list = list(num_classes_list)
 
         # one MLP head per task  (Linear-BN-ReLU-Drop-Linear)
         self.heads = nn.ModuleList()
@@ -45,25 +46,45 @@ class MultiTaskClassifier(nn.Module):
                 w = torch.tensor(class_weights[i], dtype=torch.float32)
             self.criterions.append(CrossEntropyLoss(weight=w, ignore_index=-1))
 
-    # ----------------------------------------------------------
     def forward(self, input_dict):
         point = self.backbone(input_dict)
-        # global pooling (identical to DefaultClassifier)
+
+        # pooling globale
         feat = segment_csr(point.feat, point.offset, reduce="mean")  # [B, embed_dim]
 
+        # logit per ogni task
         logits = [head(feat) for head in self.heads]
 
-        if any(k.startswith("label_") for k in input_dict.keys()):
+        # creo una sola volta cls_logits e poi lo ri-uso
+        cls_logits = torch.cat(logits, dim=1)        # [B, sum(num_classes_list)]
+
+        if any(k.startswith("label_") for k in input_dict):
             losses = []
-            for i, logit in enumerate(logits):
-                target = input_dict[f"label_{i}"].view(-1)  # each head gt
-                 # Cross-Entropy
-                losses.append(self.criterions[i](logit, target))
+            for i, (logit, n_cls) in enumerate(zip(logits, self.num_classes_list)):
+                target = input_dict[f"label_{i}"].view(-1)
+
+                # --- Sanity check (will raise *before* we touch CUDA kernels)
+                if (target < 0).any() or (target >= n_cls).any():
+                    bad_vals = target[(target < 0) | (target >= n_cls)].unique()
+                    raise ValueError(
+                        f"Head {i}: found invalid label(s) {bad_vals.tolist()} "
+                        f"for n_classes = {n_cls}. Valid range is [0, {n_cls-1}]."
+                    )
+
+                if target.shape[0] != feat.shape[0]:
+                    print(f"[WARN] Adjusting label_{i} from {target.shape[0]} to {feat.shape[0]}")
+                    target = target[:feat.shape[0]]
+
+                loss_val = self.criterions[i](logit, target)
+                if loss_val.ndim > 0:
+                    loss_val = loss_val.mean()
+                losses.append(loss_val)
+
             total_loss = sum(losses)
-            out = {"loss": total_loss}
+            out = {"loss": total_loss, "cls_logits": cls_logits}
             for i, l in enumerate(losses):
                 out[f"loss_{i}"] = l
             return out
 
-        # inference
-        return {"logits": logits}
+        # inference (niente label)
+        return {"logits": logits, "cls_logits": cls_logits}
