@@ -463,16 +463,16 @@ def train_test_split(json_dir, output_dir, train_ratio=0.8):
     json_dir = Path(json_dir)
     output_dir = Path(output_dir)
     train_dir = output_dir / "train"
-    test_dir = output_dir / "test"
+    val_dir = output_dir / "val"
     train_dir.mkdir(parents=True, exist_ok=True)
-    test_dir.mkdir(parents=True, exist_ok=True)
+    val_dir.mkdir(parents=True, exist_ok=True)
 
     all_jsons = list(json_dir.glob("*.json"))
     random.shuffle(all_jsons)
     split_idx = int(len(all_jsons) * train_ratio)
 
     for i, file in enumerate(all_jsons):
-        dest = train_dir if i < split_idx else test_dir
+        dest = train_dir if i < split_idx else val_dir
         shutil.copy(file, dest / file.name)
 
 def process_labels(xlsx_file, output_csv):
@@ -484,19 +484,19 @@ def process_labels(xlsx_file, output_csv):
 
     # Normalize class columns
     df["CLASSE DX"] = df["CLASSE DX"].astype(str).str.lower().replace({
-        "seconda classe testa a testa": "Seconda Classe",
-        "seconda classe piena": "Seconda Classe"
+        "seconda classe testa a testa": "seconda classe",
+        "seconda classe piena": "seconda classe"
     })
     df["CLASSE SX"] = df["CLASSE SX"].astype(str).str.lower().replace({
-        "seconda classe testa a testa": "Seconda Classe",
-        "seconda classe piena": "Seconda Classe"
+        "seconda classe testa a testa": "seconda classe",
+        "seconda classe piena": "seconda classe"
     })
 
     # Normalize morso anteriore
     df["MORSO ANTERIORE"] = df["MORSO ANTERIORE"].astype(str).str.lower().replace({
-        "morso profondo": "Profondo",
-        "morso aperto": "Aperto",
-        "morso inverso": "Inverso"
+        "morso profondo": "profondo",
+        "morso aperto": "aperto",
+        "morso inverso": "inverso"
     })
 
     # Drop TRASVERSALE and shift columns left
@@ -505,13 +505,46 @@ def process_labels(xlsx_file, output_csv):
 
     # Normalize TRASVERSALE (senza id denti)
     df["TRASVERSALE (senza id denti)"] = df["TRASVERSALE (senza id denti)"].astype(str).str.lower().replace({
-        "cross bite": "Cross",
-        "scissor bite": "Scissor",
-        "cross bite / scissor bite": "Cross",
-        "scissor bite / cross bite": "Scissor"
+        "cross bite": "cross",
+        "scissor bite": "scissor",
+        "cross bite / scissor bite": "cross",
+        "scissor bite / cross bite": "scissor"
     })
 
+    # LINEE MEDIANE lowercase
+    df["LINEE MEDIANE"] = df["LINEE MEDIANE"].astype(str).str.lower()
+
     df.to_csv(output_csv, index=False)
+
+def validate_labels(csv_file) -> None:
+    allowed: dict[str, set[str]] = {
+        "CLASSE DX": {"prima classe", "seconda classe", "terza classe"},
+        "CLASSE SX": {"prima classe", "seconda classe", "terza classe"},
+        "MORSO ANTERIORE": {"profondo", "aperto", "inverso", "normale"},
+        "TRASVERSALE (senza id denti)": {"normale", "cross", "scissor"},
+        "LINEE MEDIANE": {"centrata", "deviata"},
+    }
+
+    import pandas as pd
+    df = pd.read_csv(csv_file)
+
+    errors = []
+    for col, ok_set in allowed.items():
+        if col not in df.columns:
+            errors.append(f"Missing column: {col}")
+            continue
+        bad_values = set(df[col].dropna().unique()) - ok_set
+        if bad_values:
+            errors.append(f"{col}: not permitted values {sorted(bad_values)}")
+
+    if errors:
+        print("\n*** ERROR OCCURED ***")
+        for line in errors:
+            print(" -", line)
+        print(f"\nFix {csv_file} before going on.")
+        raise SystemExit(1)
+    else:
+        print(f"Label check OK: {csv_file} contains only valid classes.")
 
 def main():
     parser = argparse.ArgumentParser(description='Complete preprocessing pipeline')
@@ -528,11 +561,14 @@ def main():
     print("STEP 2: Merging upper and lower...")
     merge_upper_lower(args.filtered_dir, args.merged_dir)
 
-    print("STEP 3: Train/Test split...")
+    print("STEP 3: Train/Val split...")
     train_test_split(args.merged_dir, args.output_dir)
 
     print("STEP 4: Processing labels...")
     process_labels(args.xlsx_labels, Path(args.output_dir) / "labels.csv")
+
+    print("STEP 5: Verify CSV...")
+    validate_labels(Path(args.output_dir) / "labels.csv")
 
     print("Preprocessing complete.")
 
