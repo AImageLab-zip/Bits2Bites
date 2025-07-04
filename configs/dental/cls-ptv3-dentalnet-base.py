@@ -6,10 +6,10 @@ wandb_project = os.environ.get('WANDB_PROJECT')
 wandb_key = os.environ.get('WANDB_KEY')
 wandb_entity = os.environ.get('WANDB_ENTITY')
 
-batch_size = 16            # to adjust
-batch_size_val = 16
-epoch = 250
-eval_epoch = 250
+batch_size = 128            # to adjust
+batch_size_val = 128
+epoch = 100
+eval_epoch = 100
 empty_cache = False
 enable_amp = True
 
@@ -74,6 +74,30 @@ data = dict(
             )
         ],
         test_mode=True,
+        test_cfg=dict(
+            post_transform=[
+                dict(type="GridSample", grid_size=0.008, hash_type="fnv",
+                     mode="train", return_grid_coord=True),
+                dict(type="ToTensor"),
+                dict(
+                    type="Collect",
+                    keys=("coord", "grid_coord"),
+                    feat_keys=["coord", "point_label_onehot"]
+                )
+            ],
+            aug_transform=[
+                [dict(type="RandomScale", scale=[1, 1], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)],
+                [dict(type="RandomScale", scale=[0.95, 1.05], anisotropic=True)]
+            ]
+        )
     ),
 )
 
@@ -97,9 +121,9 @@ scheduler = dict(type="CosineAnnealingLR", total_steps=epoch)
 hooks = [
     dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
-    #dict(type="InformationWriter"),
+    dict(type="InformationWriter"),
     #dict(type="ClsEvaluator"),
-    dict(type="PreciseEvaluator", test_last=False),
+    # dict(type="PreciseEvaluator", test_last=False),       # test inference on "unseen data"
 ]
 
 test = dict(type="ClsTester")       # default tester prints per-head accuracy
