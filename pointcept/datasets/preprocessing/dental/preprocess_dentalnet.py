@@ -432,13 +432,14 @@ def merge_upper_lower(input_dir, merged_output_dir):
 
     upper_files = sorted(input_dir.glob("upper_*_filtered_landmarks.json"))
 
-    for upper_file in upper_files:
-        if(len(upper_file.name) == 32):
+    for idx, upper_file in enumerate(upper_files):
+        if len(upper_file.name) == 32:
             id = int(upper_file.name[6:8])
-        elif(len(upper_file.name) == 33):
+        elif len(upper_file.name) == 33:
             id = int(upper_file.name[6:9])
         else:
             id = int(upper_file.name[6])
+
         lower_file = input_dir / f"lower_{id}_filtered_landmarks.json"
         if not lower_file.exists():
             print(f"Skipping lower_{id}_filtered_landmarks.json: no matching lower file found")
@@ -452,27 +453,43 @@ def merge_upper_lower(input_dir, merged_output_dir):
         merged_data = {
             "version": "1.1",
             "description": "landmarks",
-            "key": f"dental_{id}",
+            "key": f"dental_{idx+1:04d}",
             "objects": upper_data["objects"] + lower_data["objects"]
         }
 
-        with open(merged_output_dir / f"dental_{id}.json", "w") as out:
+        with open(merged_output_dir / f"dental_{idx+1:04d}.json", "w") as out:
             json.dump(merged_data, out, indent=2)
 
-def train_test_split(json_dir, output_dir, train_ratio=0.8):
+def train_test_split(json_dir, output_dir, train_ratio=0.7, val_ratio=0.2):
     json_dir = Path(json_dir)
     output_dir = Path(output_dir)
+
+    # Clean output directory if exists
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     train_dir = output_dir / "train"
     val_dir = output_dir / "val"
+    test_dir = output_dir / "test"
     train_dir.mkdir(parents=True, exist_ok=True)
     val_dir.mkdir(parents=True, exist_ok=True)
+    test_dir.mkdir(parents=True, exist_ok=True)
 
     all_jsons = list(json_dir.glob("*.json"))
     random.shuffle(all_jsons)
-    split_idx = int(len(all_jsons) * train_ratio)
+
+    total = len(all_jsons)
+    train_end = int(total * train_ratio)
+    val_end = train_end + int(total * val_ratio)
 
     for i, file in enumerate(all_jsons):
-        dest = train_dir if i < split_idx else val_dir
+        if i < train_end:
+            dest = train_dir
+        elif i < val_end:
+            dest = val_dir
+        else:
+            dest = test_dir
         shutil.copy(file, dest / file.name)
 
 def process_labels(xlsx_file, output_csv):

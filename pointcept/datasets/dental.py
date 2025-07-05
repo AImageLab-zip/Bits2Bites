@@ -124,6 +124,8 @@ class DentalDataset(Dataset):
         data_idx = idx % len(self.data_list)
         data_name = self.data_list[data_idx]                 # e.g. dental_0123
         patient_id = data_name.split("_")[1]                 # '0123'
+        patient_id = int(patient_id)
+        patient_id = str(patient_id)
 
         # geometry (coords + one-hot)
         json_path = self.json_dir / f"{data_name}.json"
