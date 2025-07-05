@@ -29,6 +29,7 @@ class MultiClsEvaluator(HookBase):
             wandb.define_metric("precision/*", step_metric="Epoch")
             wandb.define_metric("recall/*", step_metric="Epoch")
             wandb.define_metric("f1/*", step_metric="Epoch")
+            wandb.define_metric("confusion_matrix/*", step_metric="Epoch")
 
     def after_epoch(self):
         if self.trainer.cfg.evaluate:
@@ -140,6 +141,23 @@ class MultiClsEvaluator(HookBase):
                 },
                 step=wandb.run.step,
             )
+
+        # Log confusion matrices per task at last epoch
+        if self.trainer.cfg.enable_wandb:
+            for j in range(num_tasks):
+                y_pred = predictions[j]
+                y_true = targets[j]
+                class_count = self.trainer.cfg.model.num_classes_list[j]
+                class_names = [f"class_{i}" for i in range(class_count)]
+
+                wandb.log({
+                    f"confusion_matrix/task_{j}": wandb.plot.confusion_matrix(
+                        probs=None,
+                        y_true=y_true,
+                        preds=y_pred,
+                        class_names=class_names
+                    )
+                }, step=wandb.run.step)
 
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = acc_avg
