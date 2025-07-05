@@ -122,7 +122,7 @@ hooks = [
     dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
     dict(type="InformationWriter"),
-    #dict(type="ClsEvaluator"),
+    dict(type="MultiClsEvaluator"),
     # dict(type="PreciseEvaluator", test_last=False),       # test inference on "unseen data"
 ]
 
