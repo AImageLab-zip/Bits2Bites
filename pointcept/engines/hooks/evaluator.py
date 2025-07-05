@@ -18,6 +18,132 @@ from pointcept.utils.misc import intersection_and_union_gpu
 from .default import HookBase
 from .builder import HOOKS
 
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+@HOOKS.register_module()
+class MultiClsEvaluator(HookBase):
+    def before_train(self):
+        if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
+            wandb.define_metric("val/*", step_metric="Epoch")
+            wandb.define_metric("accuracy/*", step_metric="Epoch")
+            wandb.define_metric("precision/*", step_metric="Epoch")
+            wandb.define_metric("recall/*", step_metric="Epoch")
+            wandb.define_metric("f1/*", step_metric="Epoch")
+
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        self.trainer.model.eval()
+
+        num_tasks = len(self.trainer.cfg.model.num_classes_list)
+        predictions = [[] for _ in range(num_tasks)]
+        targets = [[] for _ in range(num_tasks)]
+        losses = [[] for _ in range(num_tasks)]
+
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            for key in input_dict:
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+
+            logits_list = output_dict["logits"]
+            for j in range(num_tasks):
+                pred_j = logits_list[j].argmax(dim=1).cpu().numpy()
+                label_j = input_dict[f"label_{j}"].cpu().numpy()
+                predictions[j].extend(pred_j)
+                targets[j].extend(label_j)
+                losses[j].append(output_dict.get(f"loss_{j}", 0).item())
+
+            self.trainer.storage.put_scalar("val_loss", output_dict["loss"].item())
+            for j in range(num_tasks):
+                self.trainer.storage.put_scalar(f"val_loss_{j}", output_dict[f"loss_{j}"].item())
+
+            self.trainer.logger.info(
+                f"Test: [{i+1}/{len(self.trainer.val_loader)}] "
+                f"Loss: {output_dict['loss'].item():.4f} "
+                + " ".join([f"loss_{j}: {output_dict[f'loss_{j}'].item():.4f}" for j in range(num_tasks)])
+            )
+
+        current_epoch = self.trainer.epoch + 1
+
+        # Compute average loss across batches
+        val_loss_avg = self.trainer.storage.history("val_loss").avg
+        val_loss_per_task = {
+            f"val_loss_{j}": self.trainer.storage.history(f"val_loss_{j}").avg
+            for j in range(num_tasks)
+        }
+
+        agg_metrics = {"accuracy": [], "precision": [], "recall": [], "f1": []}
+        for j in range(num_tasks):
+            y_pred = predictions[j]
+            y_true = targets[j]
+
+            acc = accuracy_score(y_true, y_pred)
+            prec = precision_score(y_true, y_pred, average="macro", zero_division=0)
+            rec = recall_score(y_true, y_pred, average="macro", zero_division=0)
+            f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
+
+            agg_metrics["accuracy"].append(acc)
+            agg_metrics["precision"].append(prec)
+            agg_metrics["recall"].append(rec)
+            agg_metrics["f1"].append(f1)
+
+            self.trainer.logger.info(
+                f"Task {j}: Acc: {acc:.4f} | Prec: {prec:.4f} | Rec: {rec:.4f} | F1: {f1:.4f}"
+            )
+
+            if self.trainer.writer is not None:
+                self.trainer.writer.add_scalar(f"val/task_{j}/accuracy", acc, current_epoch)
+                self.trainer.writer.add_scalar(f"val/task_{j}/precision", prec, current_epoch)
+                self.trainer.writer.add_scalar(f"val/task_{j}/recall", rec, current_epoch)
+                self.trainer.writer.add_scalar(f"val/task_{j}/f1", f1, current_epoch)
+                self.trainer.writer.add_scalar(f"val/loss_{j}", val_loss_per_task[f"val_loss_{j}"], current_epoch)
+
+        # aggregates
+        acc_avg = sum(agg_metrics["accuracy"]) / num_tasks
+        prec_avg = sum(agg_metrics["precision"]) / num_tasks
+        rec_avg = sum(agg_metrics["recall"]) / num_tasks
+        f1_avg = sum(agg_metrics["f1"]) / num_tasks
+
+        self.trainer.logger.info(
+            f"Aggregated metrics: Acc: {acc_avg:.4f} | Prec: {prec_avg:.4f} | Rec: {rec_avg:.4f} | F1: {f1_avg:.4f}"
+        )
+
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/avg/accuracy", acc_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/avg/precision", prec_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/avg/recall", rec_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/avg/f1", f1_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/loss", val_loss_avg, current_epoch)
+
+        if self.trainer.cfg.enable_wandb:
+            wandb.log(
+                {
+                    "Epoch": current_epoch,
+                    # Val loss
+                    "val/loss": val_loss_avg,
+                    **{f"val/loss_{j}": val_loss_per_task[f"val_loss_{j}"] for j in range(num_tasks)},
+                    # Separate metric panels
+                    "accuracy/avg": acc_avg,
+                    "precision/avg": prec_avg,
+                    "recall/avg": rec_avg,
+                    "f1/avg": f1_avg,
+                    **{f"accuracy/task_{j}": agg_metrics["accuracy"][j] for j in range(num_tasks)},
+                    **{f"precision/task_{j}": agg_metrics["precision"][j] for j in range(num_tasks)},
+                    **{f"recall/task_{j}": agg_metrics["recall"][j] for j in range(num_tasks)},
+                    **{f"f1/task_{j}": agg_metrics["f1"][j] for j in range(num_tasks)},
+                },
+                step=wandb.run.step,
+            )
+
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+        self.trainer.comm_info["current_metric_value"] = acc_avg
+        self.trainer.comm_info["current_metric_name"] = "avg_accuracy"
 
 @HOOKS.register_module()
 class ClsEvaluator(HookBase):
