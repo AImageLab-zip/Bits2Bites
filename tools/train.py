@@ -12,10 +12,15 @@ from pointcept.engines.defaults import (
 )
 from pointcept.engines.train import TRAINERS
 from pointcept.engines.launch import launch
+import os
 
 
 def main_worker(cfg):
     cfg = default_setup(cfg)
+    # Inject wandb info into cfg
+    cfg.wandb_project = os.environ.get("WANDB_PROJECT", "default_project")
+    cfg.wandb_key = os.environ.get("WANDB_KEY", "no_key")
+    cfg.wandb_entity = os.environ.get("WANDB_ENTITY", "default_entity")
     trainer = TRAINERS.build(dict(type=cfg.train.type, cfg=cfg))
     trainer.train()
 

@@ -1,11 +1,5 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-import os
-
-wandb_project = os.environ.get('WANDB_PROJECT')
-wandb_key = os.environ.get('WANDB_KEY')
-wandb_entity = os.environ.get('WANDB_ENTITY')
-
 batch_size = 128            # to adjust
 batch_size_val = 128
 epoch = 100
