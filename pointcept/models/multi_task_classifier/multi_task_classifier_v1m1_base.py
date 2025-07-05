@@ -51,35 +51,28 @@ class MultiTaskClassifier(nn.Module):
         point = Point(input_dict)
         point = self.backbone(point)
 
-        # pooling globale
+        # global pooling
         feat = segment_csr(
             point.feat,
             torch.nn.functional.pad(point.offset, (1, 0)),  # prepend 0
             reduce="mean"
         )
 
-        # logit per ogni task
+        # per-task logits
         logits = [head(feat) for head in self.heads]
 
-        cls_logits = torch.cat(logits, dim=1)        # [B, sum(num_classes_list)]
+        out = {"logits": logits}
 
+        # compute losses
         if any(k.startswith("label_") for k in input_dict):
             losses = []
-            for i, (logit, n_cls) in enumerate(zip(logits, self.num_classes_list)):
+            for i, logit in enumerate(logits):
                 target = input_dict[f"label_{i}"].view(-1)
-
                 loss_val = self.criterions[i](logit, target)
                 if loss_val.ndim > 0:
                     loss_val = loss_val.mean()
                 losses.append(loss_val)
+                out[f"loss_{i}"] = loss_val
+            out["loss"] = sum(losses)
 
-            total_loss = sum(losses)
-            out = {
-                "loss": total_loss
-                }
-            for i, l in enumerate(losses):
-                out[f"loss_{i}"] = l
-            return out
-
-        # inference (niente label)
-        return {"logits": logits, "cls_logits": cls_logits}
+        return out
