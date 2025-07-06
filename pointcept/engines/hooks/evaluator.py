@@ -81,8 +81,12 @@ class MultiClsEvaluator(HookBase):
 
         agg_metrics = {"accuracy": [], "precision": [], "recall": [], "f1": []}
         for j in range(num_tasks):
-            y_pred = predictions[j]
-            y_true = targets[j]
+            y_pred = np.array(predictions[j])
+            y_true = np.array(targets[j])
+
+            valid_mask = y_true != -1
+            y_pred = y_pred[valid_mask]
+            y_true = y_true[valid_mask]
 
             acc = accuracy_score(y_true, y_pred)
             prec = precision_score(y_true, y_pred, average="macro", zero_division=0)
@@ -145,10 +149,14 @@ class MultiClsEvaluator(HookBase):
         # Log confusion matrices per task at last epoch
         if self.trainer.cfg.enable_wandb:
             for j in range(num_tasks):
-                y_pred = predictions[j]
-                y_true = targets[j]
+                y_pred = np.array(predictions[j])
+                y_true = np.array(targets[j])
                 class_count = self.trainer.cfg.model.num_classes_list[j]
                 class_names = [f"class_{i}" for i in range(class_count)]
+
+                valid_mask = (y_true != -1) & (y_true < class_count)
+                y_true = y_true[valid_mask]
+                y_pred = y_pred[valid_mask]
 
                 wandb.log({
                     f"confusion_matrix/task_{j}": wandb.plot.confusion_matrix(
