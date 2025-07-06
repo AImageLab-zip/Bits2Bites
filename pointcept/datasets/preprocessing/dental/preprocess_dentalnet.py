@@ -12,6 +12,25 @@ import numpy as np
 from pathlib import Path
 import argparse
 from typing import Dict, List, Tuple, Optional
+import glob
+import trimesh
+from sklearn.model_selection import StratifiedKFold
+import uuid
+
+def ensure_clean_directory(path):
+    if os.path.exists(path):
+        # Clear the directory
+        for filename in os.listdir(path):
+            file_path = os.path.join(path, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)  # Remove file or link
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)  # Remove directory
+            except Exception as e:
+                print(f'Failed to delete {file_path}. Reason: {e}')
+    else:
+        os.makedirs(path)  # Create directory if it doesn't exist
 
 class LandmarkFilter:
     def __init__(self, score_threshold: float = 0.5, min_instance_points: int = 10):
@@ -425,7 +444,7 @@ class LandmarkFilter:
         print(f"Total landmarks kept: {total_filtered}")
         print(f"Overall filtering ratio: {total_filtered/total_original*100:.1f}%" if total_original > 0 else "No landmarks processed")
 
-def merge_upper_lower(input_dir, merged_output_dir):
+def merge_upper_lower(input_dir, merged_output_dir, strategy):
     input_dir = Path(input_dir)
     merged_output_dir = Path(merged_output_dir)
     merged_output_dir.mkdir(parents=True, exist_ok=True)
@@ -433,64 +452,106 @@ def merge_upper_lower(input_dir, merged_output_dir):
     upper_files = sorted(input_dir.glob("upper_*_filtered_landmarks.json"))
 
     for idx, upper_file in enumerate(upper_files):
-        if len(upper_file.name) == 32:
-            id = int(upper_file.name[6:8])
-        elif len(upper_file.name) == 33:
-            id = int(upper_file.name[6:9])
-        else:
-            id = int(upper_file.name[6])
-
-        lower_file = input_dir / f"lower_{id}_filtered_landmarks.json"
-        if not lower_file.exists():
-            print(f"Skipping lower_{id}_filtered_landmarks.json: no matching lower file found")
+        filename = upper_file.name
+        try:
+            id = int(filename.split("_")[1])
+        except Exception as e:
+            print(f"Skipping file {filename}: cannot extract ID")
             continue
 
-        with open(upper_file) as f:
-            upper_data = json.load(f)
-        with open(lower_file) as f:
-            lower_data = json.load(f)
+        lower_file = input_dir / f"lower_{id}_filtered_landmarks.json"
+        pointcloud_file = input_dir / f"pointcloud_{id:04d}.json"
 
+        merged_objects = []
+
+        # Strategy 1 and 3: include landmarks
+        if strategy in (1, 3):
+            # Upper landmarks
+            try:
+                with open(upper_file) as f:
+                    upper_data = json.load(f)
+                merged_objects.extend(upper_data.get("objects", []))
+            except Exception as e:
+                print(f"Warning: Could not load upper landmarks for ID {id}: {e}")
+
+            # Lower landmarks
+            try:
+                with open(lower_file) as f:
+                    lower_data = json.load(f)
+                merged_objects.extend(lower_data.get("objects", []))
+            except Exception as e:
+                print(f"Warning: Could not load lower landmarks for ID {id}: {e}")
+
+        # Strategy 2 and 3: include mesh (pointcloud)
+        if strategy in (2, 3):
+            try:
+                with open(pointcloud_file) as f:
+                    pointcloud_data = json.load(f)
+                merged_objects.extend(pointcloud_data.get("objects", []))
+            except Exception as e:
+                print(f"Warning: Could not load pointcloud for ID {id}: {e}")
+
+        # Final JSON structure
         merged_data = {
             "version": "1.1",
-            "description": "landmarks",
-            "key": f"dental_{idx+1:04d}",
-            "objects": upper_data["objects"] + lower_data["objects"]
+            "description": "landmarks" if strategy == 1 else "mesh" if strategy == 2 else "landmarks+mesh",
+            "key": f"dental_{idx + 1:04d}",
+            "objects": merged_objects
         }
 
-        with open(merged_output_dir / f"dental_{idx+1:04d}.json", "w") as out:
+        # Save output
+        output_path = merged_output_dir / f"dental_{idx + 1:04d}.json"
+        with open(output_path, "w") as out:
             json.dump(merged_data, out, indent=2)
 
-def train_test_split(json_dir, output_dir, train_ratio=0.7, val_ratio=0.2):
-    json_dir = Path(json_dir)
-    output_dir = Path(output_dir)
+        print(f"Saved merged file: {output_path.name}")
 
-    # Clean output directory if exists
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+def create_balanced_folds(json_dir: Path, labels_csv: Path, output_dir: Path, n_folds=5) -> None:
+    df = pd.read_csv(labels_csv)
 
-    train_dir = output_dir / "train"
-    val_dir = output_dir / "val"
-    test_dir = output_dir / "test"
-    train_dir.mkdir(parents=True, exist_ok=True)
-    val_dir.mkdir(parents=True, exist_ok=True)
-    test_dir.mkdir(parents=True, exist_ok=True)
+    # Crea colonna 'key' che mappa ai file JSON
+    df['key'] = df['PAZIENTE'].apply(lambda x: f"dental_{int(x):04d}")
 
-    all_jsons = list(json_dir.glob("*.json"))
-    random.shuffle(all_jsons)
+    # Crea colonna combinata per stratificazione
+    df['combined'] = df.apply(lambda row: '_'.join(str(row[c]) for c in df.columns if c not in ['PAZIENTE', 'key']), axis=1)
 
-    total = len(all_jsons)
-    train_end = int(total * train_ratio)
-    val_end = train_end + int(total * val_ratio)
+    file_names = sorted([f for f in json_dir.glob("dental_*.json")])
+    file_map = {f.stem: f for f in file_names}
 
-    for i, file in enumerate(all_jsons):
-        if i < train_end:
-            dest = train_dir
-        elif i < val_end:
-            dest = val_dir
-        else:
-            dest = test_dir
-        shutil.copy(file, dest / file.name)
+    keys = df['key'].tolist()
+    combined_labels = df['combined'].tolist()
+
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+    fold_assignments = [None] * len(df)
+
+    for fold_idx, (_, test_index) in enumerate(skf.split(keys, combined_labels)):
+        for i in test_index:
+            fold_assignments[i] = fold_idx
+
+    df['fold'] = fold_assignments
+
+    # Rimuovi la colonna combinata
+    df.drop(columns=['combined'], inplace=True)
+
+    # Scrivi la nuova CSV aggiornata
+    df.to_csv(labels_csv, index=False)
+
+    # Crea le directory dei fold
+    for i in range(n_folds):
+        fold_path = output_dir / f"fold_{i+1}"
+        if fold_path.exists():
+            shutil.rmtree(fold_path)
+        fold_path.mkdir(parents=True, exist_ok=True)
+
+    for idx, row in df.iterrows():
+        key = row['key']
+        fold = row['fold']
+        filename = f"{key}.json"
+        src = file_map.get(key)
+        if src:
+            shutil.copy(src, output_dir / f"fold_{fold+1}" / filename)
+
+    print(f"Balanced dataset split in {n_folds} folds at: {output_dir}")
 
 def process_labels(xlsx_file, output_csv):
     df = pd.read_excel(xlsx_file, header=None)
@@ -535,11 +596,11 @@ def process_labels(xlsx_file, output_csv):
 
 def validate_labels(csv_file) -> None:
     allowed: dict[str, set[str]] = {
-        "CLASSE DX": {"prima classe", "seconda classe", "terza classe"},
-        "CLASSE SX": {"prima classe", "seconda classe", "terza classe"},
-        "MORSO ANTERIORE": {"profondo", "aperto", "inverso", "normale"},
-        "TRASVERSALE (senza id denti)": {"normale", "cross", "scissor"},
-        "LINEE MEDIANE": {"centrata", "deviata"},
+        "CLASSE DX": {"non valutabile", "prima classe", "seconda classe", "terza classe"},
+        "CLASSE SX": {"non valutabile", "prima classe", "seconda classe", "terza classe"},
+        "MORSO ANTERIORE": {"non valutabile", "profondo", "aperto", "inverso", "normale"},
+        "TRASVERSALE (senza id denti)": {"non valutabile", "normale", "cross", "scissor"},
+        "LINEE MEDIANE": {"non valutabile", "centrata", "deviata"},
     }
 
     import pandas as pd
@@ -563,29 +624,98 @@ def validate_labels(csv_file) -> None:
     else:
         print(f"Label check OK: {csv_file} contains only valid classes.")
 
+def load_points_from_stl(filepath):
+    mesh = trimesh.load_mesh(filepath)
+    points, face_indices = trimesh.sample.sample_surface(mesh, count=10000, seed=42)
+    return points
+
+
+def generate_pointcloud_json(lower_path, upper_path, output_path, index):
+    points = []
+
+    for path in [lower_path, upper_path]:
+        vertices = load_points_from_stl(path)
+        for vertex in vertices:
+            points.append({
+                "key": f"uuid_{uuid.uuid4().int}",
+                "class": "Mesh",
+                "coord": vertex.tolist()
+            })
+
+    pointcloud = {
+        "version": "1.1",
+        "description": "pointcloud",
+        "key": f"pointcloud_{index:04d}",
+        "objects": points
+    }
+
+    filename = f"pointcloud_{index:04d}.json"
+    out_path = os.path.join(output_path, filename)
+    with open(out_path, 'w') as f:
+        json.dump(pointcloud, f, indent=2)
+    print(f"Saved {filename}")
+
+def extract_pointcloud(input_dir, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+
+    lower_files = sorted(glob.glob(os.path.join(input_dir, "STEM_lower_*.stl")))
+    upper_files = sorted(glob.glob(os.path.join(input_dir, "STEM_upper_*.stl")))
+
+    matched = {}
+    for lf in lower_files:
+        base = os.path.basename(lf).replace("STEM_lower_", "").replace(".stl", "")
+        matched[base] = {"lower": lf}
+
+    for uf in upper_files:
+        base = os.path.basename(uf).replace("STEM_upper_", "").replace(".stl", "")
+        if base in matched:
+            matched[base]["upper"] = uf
+
+    index = 1
+    for key, pair in matched.items():
+        if "lower" in pair and "upper" in pair:
+            generate_pointcloud_json(pair["lower"], pair["upper"], output_dir, index)
+            index += 1
+        else:
+            print(f"Skipping incomplete pair for key: {key}")
+        print("", flush=True)
+
 def main():
     parser = argparse.ArgumentParser(description='Complete preprocessing pipeline')
+    parser.add_argument('--strategy', type=int, required=True, help='1: landmarks, 2: mesh, 3: landmarks+mesh')
     parser.add_argument('--input_dir', type=str, required=True, help='Input directory of landmark/segmentation files')
     parser.add_argument('--filtered_dir', type=str, required=True, help='Intermediate output for filtered files')
     parser.add_argument('--merged_dir', type=str, required=True, help='Output directory for merged landmark JSON files')
     parser.add_argument('--output_dir', type=str, required=True, help='Final output directory with train/test and labels')
     parser.add_argument('--xlsx_labels', type=str, required=True, help='Path to input Excel labels file')
+    parser.add_argument('--skip', type=str, required=False, help='Skip pipeline steps')
     args = parser.parse_args()
 
-    print("STEP 1: Filtering landmarks...")
-    LandmarkFilter().batch_filter(args.input_dir, args.filtered_dir)
+    if args.skip == None:
+        args.skip = ""
 
-    print("STEP 2: Merging upper and lower...")
-    merge_upper_lower(args.filtered_dir, args.merged_dir)
+    if "filter" not in args.skip:
+        print("Filtering landmarks...")
+        LandmarkFilter().batch_filter(args.input_dir, args.filtered_dir)
 
-    print("STEP 3: Train/Val split...")
-    train_test_split(args.merged_dir, args.output_dir)
+    if "pointcloud" not in args.skip:
+        print("Extract pointclouds...", flush=True)
+        extract_pointcloud(args.input_dir, args.filtered_dir)
 
-    print("STEP 4: Processing labels...")
+    ensure_clean_directory(args.merged_dir)
+    ensure_clean_directory(args.output_dir)
+
+    print("Merging upper and lower...", flush=True)
+    merge_upper_lower(args.filtered_dir, args.merged_dir, args.strategy)
+
+    print("Processing labels...", flush=True)
     process_labels(args.xlsx_labels, Path(args.output_dir) / "labels.csv")
 
-    print("STEP 5: Verify CSV...")
+    print("Verify CSV...", flush=True)
     validate_labels(Path(args.output_dir) / "labels.csv")
+
+    print("Creating balanced folds...", flush=True)
+    create_balanced_folds(Path(args.merged_dir), Path(args.output_dir) / "labels.csv", Path(args.output_dir))
 
     print("Preprocessing complete.")
 
