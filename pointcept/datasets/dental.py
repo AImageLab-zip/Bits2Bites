@@ -41,6 +41,13 @@ STRING2IDX = {
     "midline":    {c: i for i, c in enumerate(MIDLINE_CLASSES)},
 }
 
+def _map_label(value: str, category: str) -> int:
+    try:
+        return STRING2IDX[category][value]
+    except KeyError:
+        print("DataLoader: found invalid label to ignore")
+        return -1
+
 @DATASETS.register_module()
 class DentalDataset(Dataset):
     r""".
@@ -133,23 +140,29 @@ class DentalDataset(Dataset):
             obj = json.load(fp)
 
         coords = np.asarray([o["coord"] for o in obj["objects"]], dtype=np.float32)
-        point_lbl_idx = np.asarray(
-            [POINT_CLASS_TO_IDX[o["class"]] for o in obj["objects"]],
-            dtype=np.int64,
-        )
-        one_hot = np.eye(len(POINT_CLASSES), dtype=np.float32)[point_lbl_idx]
 
+        one_hot_list = []
+        for o in obj["objects"]:
+            if o["class"] == "Mesh":
+                one_hot = np.zeros(len(POINT_CLASSES), dtype=np.float32)
+            else:
+                idx = POINT_CLASS_TO_IDX[o["class"]]
+                one_hot = np.zeros(len(POINT_CLASSES), dtype=np.float32)
+                one_hot[idx] = 1.0
+            one_hot_list.append(one_hot)
+
+        one_hot = np.stack(one_hot_list, axis=0)  # (N, 6)
         # labels from CSV 
         row = self.labels_df[self.labels_df.iloc[:, 0] == patient_id]
         if row.empty:
             raise KeyError(f"Patient {patient_id} not found in labels.csv")
         row = row.iloc[0]
 
-        lbl_right  = STRING2IDX["right"][row[1]]
-        lbl_left   = STRING2IDX["left"][row[2]]
-        lbl_ant    = STRING2IDX["anterior"][row[3]]
-        lbl_trans  = STRING2IDX["transverse"][row[4]]
-        lbl_mid    = STRING2IDX["midline"][row[5]]
+        lbl_right  = _map_label(row[1], "right")
+        lbl_left   = _map_label(row[2], "left")
+        lbl_ant    = _map_label(row[3], "anterior")
+        lbl_trans  = _map_label(row[4], "transverse")
+        lbl_mid    = _map_label(row[5], "midline")
 
         # create dict
 
