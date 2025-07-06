@@ -8,7 +8,7 @@ empty_cache = False
 enable_amp = True
 
 dataset_type = "DentalDataset"
-data_root = "data/dental"
+data_root = "data/dental_landmarks"
 num_classes_list = [3, 3, 4, 3, 2]   # class sizes
 
 data = dict(
