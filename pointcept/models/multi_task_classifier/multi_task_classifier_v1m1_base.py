@@ -17,7 +17,7 @@ class MultiTaskClassifier(nn.Module):
         self,
         backbone,
         num_classes_list,
-        embed_dim,
+        backbone_embed_dim,
         loss_type="ce",
         class_weights=None,
     ):
@@ -32,11 +32,15 @@ class MultiTaskClassifier(nn.Module):
         for n_cls in num_classes_list:
             self.heads.append(
                 nn.Sequential(
-                    nn.Linear(embed_dim, 256, bias=False),
+                    nn.Linear(backbone_embed_dim, 256),
                     nn.BatchNorm1d(256),
                     nn.ReLU(inplace=True),
-                    nn.Dropout(0.5),
-                    nn.Linear(256, n_cls, bias=True),
+                    nn.Dropout(p=0.5),
+                    nn.Linear(256, 128),
+                    nn.BatchNorm1d(128),
+                    nn.ReLU(inplace=True),
+                    nn.Dropout(p=0.5),
+                    nn.Linear(128, n_cls),
                 )
             )
         # CrossEntropy
