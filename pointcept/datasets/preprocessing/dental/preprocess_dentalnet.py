@@ -16,8 +16,6 @@ import trimesh
 from sklearn.model_selection import StratifiedKFold
 import uuid
 
-POINT_RESOLUTION=100000
-
 def ensure_clean_directory(path):
     if os.path.exists(path):
         # Clear the directory
@@ -627,8 +625,7 @@ def validate_labels(csv_file) -> None:
 
 def load_points_from_stl(filepath):
     mesh = trimesh.load_mesh(filepath)
-    points, face_indices = trimesh.sample.sample_surface(mesh, count=POINT_RESOLUTION, seed=42)
-    return points
+    return mesh.vertices
 
 
 def generate_pointcloud_json(lower_path, upper_path, output_path, index):
