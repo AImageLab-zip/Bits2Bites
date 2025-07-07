@@ -2,8 +2,9 @@ _base_ = ["../_base_/default_runtime.py"]
 
 batch_size = 128            # to adjust
 batch_size_val = 128
-epoch = 100
-eval_epoch = 100
+epoch = 300
+eval_epoch = 300
+num_worker = 4
 empty_cache = False
 enable_amp = True
 
