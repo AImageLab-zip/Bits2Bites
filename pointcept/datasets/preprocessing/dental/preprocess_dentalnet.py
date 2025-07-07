@@ -6,7 +6,6 @@ import shutil
 import pandas as pd
 from pathlib import Path
 
-# === START: LandmarkFilter class from landmarks_filter.py ===
 import json
 import numpy as np
 from pathlib import Path
@@ -16,6 +15,8 @@ import glob
 import trimesh
 from sklearn.model_selection import StratifiedKFold
 import uuid
+
+POINT_RESOLUTION=100000
 
 def ensure_clean_directory(path):
     if os.path.exists(path):
@@ -626,7 +627,7 @@ def validate_labels(csv_file) -> None:
 
 def load_points_from_stl(filepath):
     mesh = trimesh.load_mesh(filepath)
-    points, face_indices = trimesh.sample.sample_surface(mesh, count=10000, seed=42)
+    points, face_indices = trimesh.sample.sample_surface(mesh, count=POINT_RESOLUTION, seed=42)
     return points
 
 
