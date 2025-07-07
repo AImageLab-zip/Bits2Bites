@@ -20,6 +20,11 @@ from .builder import HOOKS
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
+LABELS = ['classe_DX', 'classe_SX', 'morso_ant', 'trasversale', 'mediane']
+
+def _get_label_name(idx):
+    return LABELS[idx]
+
 @HOOKS.register_module()
 class MultiClsEvaluator(HookBase):
     def before_train(self):
@@ -132,16 +137,16 @@ class MultiClsEvaluator(HookBase):
                     "Epoch": current_epoch,
                     # Val loss
                     "val/loss": val_loss_avg,
-                    **{f"val/loss_{j}": val_loss_per_task[f"val_loss_{j}"] for j in range(num_tasks)},
+                    **{f"val/loss_{_get_label_name(j)}": val_loss_per_task[f"val_loss_{j}"] for j in range(num_tasks)},
                     # Separate metric panels
                     "accuracy/avg": acc_avg,
                     "precision/avg": prec_avg,
                     "recall/avg": rec_avg,
                     "f1/avg": f1_avg,
-                    **{f"accuracy/task_{j}": agg_metrics["accuracy"][j] for j in range(num_tasks)},
-                    **{f"precision/task_{j}": agg_metrics["precision"][j] for j in range(num_tasks)},
-                    **{f"recall/task_{j}": agg_metrics["recall"][j] for j in range(num_tasks)},
-                    **{f"f1/task_{j}": agg_metrics["f1"][j] for j in range(num_tasks)},
+                    **{f"accuracy/task_{_get_label_name(j)}": agg_metrics["accuracy"][j] for j in range(num_tasks)},
+                    **{f"precision/task_{_get_label_name(j)}": agg_metrics["precision"][j] for j in range(num_tasks)},
+                    **{f"recall/task_{_get_label_name(j)}": agg_metrics["recall"][j] for j in range(num_tasks)},
+                    **{f"f1/task_{_get_label_name(j)}": agg_metrics["f1"][j] for j in range(num_tasks)},
                 },
                 step=wandb.run.step,
             )
@@ -159,7 +164,7 @@ class MultiClsEvaluator(HookBase):
                 y_pred = y_pred[valid_mask]
 
                 wandb.log({
-                    f"confusion_matrix/task_{j}": wandb.plot.confusion_matrix(
+                    f"confusion_matrix/task_{_get_label_name(j)}": wandb.plot.confusion_matrix(
                         probs=None,
                         y_true=y_true,
                         preds=y_pred,

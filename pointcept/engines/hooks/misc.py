@@ -76,6 +76,10 @@ class IterationTimer(HookBase):
             self.trainer.storage.history("data_time").reset()
             self.trainer.storage.history("batch_time").reset()
 
+LABELS = ['classe_DX', 'classe_SX', 'morso_ant', 'trasversale', 'mediane']
+
+def _get_label_name(idx):
+    return LABELS[idx]
 
 @HOOKS.register_module()
 class InformationWriter(HookBase):
@@ -154,16 +158,21 @@ class InformationWriter(HookBase):
                 )
 
             if self.trainer.cfg.enable_wandb:
-
                 for key in self.model_output_keys:
+                    if key.startswith("loss_"):
+                        idx = int(key.split("_")[1])
+                        label_name = _get_label_name(idx)
+                        log_key = f"train/loss_{label_name}"
+                    else:
+                        log_key = f"train/{key}"
+
                     wandb.log(
                         {
                             "Epoch": self.trainer.epoch + 1,
-                            f"train/{key}": self.trainer.storage.history(key).avg,
+                            log_key: self.trainer.storage.history(key).avg,
                         },
                         step=wandb.run.step,
                     )
-
 
 @HOOKS.register_module()
 class CheckpointSaver(HookBase):
