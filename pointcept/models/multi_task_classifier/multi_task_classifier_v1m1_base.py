@@ -55,12 +55,16 @@ class MultiTaskClassifier(nn.Module):
         point = Point(input_dict)
         point = self.backbone(point)
 
-        # global pooling
-        feat = segment_csr(
-            point.feat,
-            torch.nn.functional.pad(point.offset, (1, 0)),  # prepend 0
-            reduce="mean"
-        )
+        # PTv3 or SpuNet
+        if isinstance(point, Point):
+            point.feat = segment_csr(
+                src=point.feat,
+                indptr=nn.functional.pad(point.offset, (1, 0)),
+                reduce="mean",
+            )
+            feat = point.feat
+        else:
+            feat = point
 
         # per-task logits
         logits = [head(feat) for head in self.heads]
