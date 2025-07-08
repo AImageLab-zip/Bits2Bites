@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 cd $(dirname $(dirname "$0")) || exit
 ROOT_DIR=$(pwd)
@@ -15,8 +15,9 @@ NUM_GPU=None
 NUM_MACHINE=1
 DIST_URL="auto"
 
+OPTIONS_LIST=()
 
-while getopts "p:d:c:n:w:g:m:r:" opt; do
+while getopts "p:d:c:n:w:g:m:o:r:" opt; do
   case $opt in
     p)
       PYTHON=$OPTARG
@@ -41,6 +42,9 @@ while getopts "p:d:c:n:w:g:m:r:" opt; do
       ;;
     m)
       NUM_MACHINE=$OPTARG
+      ;;
+    o)
+      OPTIONS_LIST+=("$OPTARG")
       ;;
     \?)
       echo "Invalid option: -$OPTARG"
@@ -72,13 +76,11 @@ echo "Dist URL: $DIST_URL"
 EXP_DIR=exp/${DATASET}/${EXP_NAME}
 MODEL_DIR=${EXP_DIR}/model
 CODE_DIR=${EXP_DIR}/code
-CONFIG_DIR=configs/${DATASET}/${CONFIG}.py
-
+CONFIG_DIR=configs/dental/${CONFIG}
 
 echo " =========> CREATE EXP DIR <========="
 echo "Experiment dir: $ROOT_DIR/$EXP_DIR"
-if [ "${RESUME}" = true ] && [ -d "$EXP_DIR" ]
-then
+if [ "${RESUME}" = true ] && [ -d "$EXP_DIR" ]; then
   CONFIG_DIR=${EXP_DIR}/config.py
   WEIGHT=$MODEL_DIR/model_last.pth
 else
@@ -91,24 +93,25 @@ echo "Loading config in:" $CONFIG_DIR
 export PYTHONPATH=./$CODE_DIR
 echo "Running code in: $CODE_DIR"
 
+# Compose all options
+OPTION_ARGS=()
+OPTION_ARGS+=("save_path=$EXP_DIR")
+if [ "${RESUME}" = true ]; then
+  OPTION_ARGS+=("resume=$RESUME")
+  OPTION_ARGS+=("weight=$WEIGHT")
+fi
+
+# Add any extra -o key=value pairs
+for opt in "${OPTIONS_LIST[@]}"; do
+  OPTION_ARGS+=("$opt")
+done
 
 echo " =========> RUN TASK <========="
 ulimit -n 65536
-if [ "${WEIGHT}" = "None" ]
-then
-    $PYTHON "$CODE_DIR"/tools/$TRAIN_CODE \
-    --config-file "$CONFIG_DIR" \
-    --num-gpus "$NUM_GPU" \
-    --num-machines "$NUM_MACHINE" \
-    --machine-rank ${SLURM_NODEID:-0} \
-    --dist-url ${DIST_URL} \
-    --options save_path="$EXP_DIR"
-else
-    $PYTHON "$CODE_DIR"/tools/$TRAIN_CODE \
-    --config-file "$CONFIG_DIR" \
-    --num-gpus "$NUM_GPU" \
-    --num-machines "$NUM_MACHINE" \
-    --machine-rank ${SLURM_NODEID:-0} \
-    --dist-url ${DIST_URL} \
-    --options save_path="$EXP_DIR" resume="$RESUME" weight="$WEIGHT"
-fi
+$PYTHON "$CODE_DIR/tools/$TRAIN_CODE" \
+  --config-file "$CONFIG_DIR" \
+  --num-gpus "$NUM_GPU" \
+  --num-machines "$NUM_MACHINE" \
+  --machine-rank "${SLURM_NODEID:-0}" \
+  --dist-url "$DIST_URL" \
+  $(for o in "${OPTION_ARGS[@]}"; do echo --options "$o"; done)

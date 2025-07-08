@@ -79,6 +79,7 @@ class DentalDataset(Dataset):
         test_cfg=None,
         loop: int = 1,
         label_csv: str | os.PathLike | None = None,
+        debug=False
     ) -> None:
         super().__init__()
         self.data_root = Path(data_root)
@@ -87,6 +88,7 @@ class DentalDataset(Dataset):
         if label_csv is None:
             label_csv = self.data_root / "labels.csv"
         self.labels_df = pd.read_csv(label_csv, dtype=str)
+        self.debug = debug
 
         self.num_points = num_points
         self.uniform_sampling = uniform_sampling
@@ -197,7 +199,40 @@ class DentalDataset(Dataset):
 
     def _prepare_train_item(self, idx: int) -> dict:
         item = copy.deepcopy(self.data_cache[self.get_data_name(idx)])
-        return self.transform(item)
+        transformed = self.transform(item)
+
+        ## DEBUG EXPORT
+        if self.debug:
+            out_dir = Path("debug_output_json")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"{self.get_data_name(idx)}.json"
+            
+            coords_norm = transformed["coord"]
+            if isinstance(coords_norm, torch.Tensor):
+                coords_norm = coords_norm.cpu().numpy()
+
+            coords_denorm = coords_norm * 50.0
+
+            objects = []
+            for i, point in enumerate(coords_denorm):
+                objects.append({
+                    "key": f"uuid_{len(coords_denorm) - 1 - i}",
+                    "class": "Debug",
+                    "coord": point.tolist()
+                })
+
+            json_data = {
+                "version": "1.1",
+                "description": "debug",
+                "key": self.get_data_name(idx),
+                "objects": objects
+            }
+
+            print(f"[DEBUG] Writing JSON to {out_path.resolve()}")
+            with open(out_path, "w") as f:
+                json.dump(json_data, f, indent=2)
+
+        return transformed
 
     def _prepare_test_item(self, idx: int) -> dict:
         assert idx < len(self.data_list)

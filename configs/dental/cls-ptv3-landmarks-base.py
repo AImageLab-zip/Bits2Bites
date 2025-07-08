@@ -1,16 +1,19 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-batch_size = 16
-batch_size_val = 16
+batch_size = 128            # to adjust
+batch_size_val = 128
 epoch = 100
 eval_epoch = 100
 num_worker = 16
 empty_cache = False
 enable_amp = True
 clip_grad = 1.0
+fold_val = 1
+run_uuid = "aaaaaa"
+debug = False
 
 dataset_type = "DentalDataset"
-data_root = "data/dental_mesh"
+data_root = "data/dental_landmarks"
 num_classes_list = [3, 3, 4, 3, 2]   # class sizes
 
 data = dict(
@@ -99,10 +102,10 @@ data = dict(
     ),
 )
 
-
+# Model
 model = dict(
     type="MultiTaskClassifier",
-    backbone_embed_dim=256,                 # SpUNet’s final feature size
+    backbone_embed_dim=128,
     num_classes_list=num_classes_list,
     class_weights=[
         [0.7185, 0.7791, 3.0794],               # classe dx
@@ -112,24 +115,27 @@ model = dict(
         [1.2821, 0.8197],                       # linee mediane
     ],
     loss_type="ce",
-    backbone=dict(
-        type="SpUNet-v1m1",
-        in_channels=9,
-        channels=(32, 64, 128, 256, 256, 128, 96, 96),
-        layers=(2, 3, 4, 6, 2, 2, 2, 2),
+    backbone=dict(                          #  Backbone: Point Transformer V3 (v1m1) and multi-task dental data
+        type="PT-v3m1",                     # as in cls-ptv3-v1m1-0-base
+        in_channels=9,                      # 3 xyz + 6 one-hot features
+        enc_channels=(16, 32, 48, 64, 128),
+        enc_num_head=(1, 2, 3, 4, 8),
+        dec_channels=(32, 32, 64, 96),
+        dec_num_head=(2, 2, 4, 6),
+        enable_flash=False,                 # True if AMPERE gpu arch
         cls_mode=True,
     ),
 )
 
-optimizer = dict(type="SGD", lr=0.01, momentum=0.9, weight_decay=0.0001, nesterov=True)
-scheduler = dict(type="MultiStepLR", milestones=[0.6, 0.8], gamma=0.1)
+optimizer = dict(type="AdamW", lr=0.0005, weight_decay=0.01)
+scheduler = dict(type="CosineAnnealingLR", total_steps=epoch)
 
 hooks = [
     dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
     dict(type="InformationWriter"),
     dict(type="MultiClsEvaluator"),
-    #dict(type="PreciseEvaluator", test_last=False),
+    # dict(type="PreciseEvaluator", test_last=False),       # test inference on "unseen data"
 ]
 
 test = dict(type="ClsTester")       # default tester prints per-head accuracy

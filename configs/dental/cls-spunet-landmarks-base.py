@@ -8,9 +8,12 @@ num_worker = 16
 empty_cache = False
 enable_amp = True
 clip_grad = 1.0
+fold_val = 1
+run_uuid = "aaaaaa"
+debug = False
 
 dataset_type = "DentalDataset"
-data_root = "data/dental_mesh"
+data_root = "data/dental_landmarks"
 num_classes_list = [3, 3, 4, 3, 2]   # class sizes
 
 data = dict(

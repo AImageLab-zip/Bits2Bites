@@ -10,6 +10,8 @@ def prepare_folds(fold_val: int, base_dir: str = "data/dental"):
     assert 1 <= fold_val <= 5, "fold_val not 1-5"
     base_path = Path(base_dir)
 
+    print(f"Fold_val: {fold_val}", flush=True)
+
     train_dir = base_path / "train"
     val_dir = base_path / "val"
 

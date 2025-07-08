@@ -1,16 +1,19 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-batch_size = 128            # to adjust
-batch_size_val = 128
+batch_size = 16            # to adjust
+batch_size_val = 16
 epoch = 100
 eval_epoch = 100
 num_worker = 16
 empty_cache = False
 enable_amp = True
 clip_grad = 1.0
+fold_val = 1
+run_uuid = "aaaaaa"
+debug = False
 
 dataset_type = "DentalDataset"
-data_root = "data/dental_landmarks"
+data_root = "data/dental_landmarks_mesh"
 num_classes_list = [3, 3, 4, 3, 2]   # class sizes
 
 data = dict(
