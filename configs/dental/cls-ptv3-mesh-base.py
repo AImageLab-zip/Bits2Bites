@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-batch_size = 16            # to adjust
-batch_size_val = 16
+batch_size = 8            # to adjust
+batch_size_val = 8
 epoch = 100
 eval_epoch = 100
 num_worker = 16
@@ -25,10 +25,9 @@ data = dict(
             dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.95, 1.05]),
             dict(type="RandomShift", shift=((-0.02,0.02),)*3),
-            dict(type="RandomRotate",angle=[-1, 1],axis="z",center=[0, 0, 0],p=0.5,),
-            dict(type="RandomDropout", dropout_ratio=0.3, dropout_application_ratio=0.5),
-            dict(type="GridSample", grid_size=0.01, hash_type="fnv",
-                 mode="train", return_grid_coord=True),
+            dict(type="RandomRotate",angle=[-0.1, 0.1],axis="z",center=[0, 0, 0],p=0.5,),
+            dict(type="RandomDropout", dropout_ratio=0.5, dropout_application_ratio=0.5),
+            dict(type="GridSample", grid_size=0.01, hash_type="fnv", mode="train", return_grid_coord=True),
             dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
