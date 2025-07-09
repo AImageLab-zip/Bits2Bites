@@ -450,7 +450,7 @@ def merge_upper_lower(input_dir, merged_output_dir, strategy):
 
     upper_files = sorted(input_dir.glob("upper_*_filtered_landmarks.json"))
 
-    for idx, upper_file in enumerate(upper_files):
+    for upper_file in upper_files:
         filename = upper_file.name
         try:
             id = int(filename.split("_")[1])
@@ -494,12 +494,12 @@ def merge_upper_lower(input_dir, merged_output_dir, strategy):
         merged_data = {
             "version": "1.1",
             "description": "landmarks" if strategy == 1 else "mesh" if strategy == 2 else "landmarks+mesh",
-            "key": f"dental_{idx + 1:04d}",
+            "key": f"dental_{id:04d}",
             "objects": merged_objects
         }
 
         # Save output
-        output_path = merged_output_dir / f"dental_{idx + 1:04d}.json"
+        output_path = merged_output_dir / f"dental_{id:04d}.json"
         with open(output_path, "w") as out:
             json.dump(merged_data, out, indent=2)
 
@@ -628,9 +628,8 @@ def load_points_from_stl(filepath):
     return mesh.vertices
 
 
-def generate_pointcloud_json(lower_path, upper_path, output_path, index):
+def generate_pointcloud_json(lower_path, upper_path, output_path, patient_id: int):
     points = []
-
     for path in [lower_path, upper_path]:
         vertices = load_points_from_stl(path)
         for vertex in vertices:
@@ -643,11 +642,11 @@ def generate_pointcloud_json(lower_path, upper_path, output_path, index):
     pointcloud = {
         "version": "1.1",
         "description": "pointcloud",
-        "key": f"pointcloud_{index:04d}",
+        "key": f"pointcloud_{patient_id:04d}",
         "objects": points
     }
 
-    filename = f"pointcloud_{index:04d}.json"
+    filename = f"pointcloud_{patient_id:04d}.json"
     out_path = os.path.join(output_path, filename)
     with open(out_path, 'w') as f:
         json.dump(pointcloud, f, indent=2)
@@ -669,14 +668,15 @@ def extract_pointcloud(input_dir, output_dir):
         if base in matched:
             matched[base]["upper"] = uf
 
-    index = 1
     for key, pair in matched.items():
         if "lower" in pair and "upper" in pair:
-            generate_pointcloud_json(pair["lower"], pair["upper"], output_dir, index)
-            index += 1
+            try:
+                patient_id = int(key)
+                generate_pointcloud_json(pair["lower"], pair["upper"], output_dir, patient_id)
+            except:
+                print(f"Skipping invalid patient ID: {key}")
         else:
             print(f"Skipping incomplete pair for key: {key}")
-        print("", flush=True)
 
 def main():
     parser = argparse.ArgumentParser(description='Complete preprocessing pipeline')
