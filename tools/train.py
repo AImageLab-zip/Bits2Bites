@@ -35,7 +35,7 @@ def main():
         data_root=os.path.join("data", "dt_" + cfg.run_uuid),
         debug=cfg.debug
     )
-    cfg.save_path = os.path.join("data", "dt_" + cfg.run_uuid)
+    cfg.save_path = os.path.join("exp", "dt_" + cfg.run_uuid)
     cfg.data_root = os.path.join("data", "dt_" + cfg.run_uuid)
     prepare_folds(cfg.fold_val, cfg.data_root)
 
