@@ -32,11 +32,13 @@ def main():
     cfg.run_uuid = os.environ.get("PROJECT_UUID", "aaaaaa")
     cfg.dataset_type=dict(
         type='DentalDataset',
-        data_root=os.path.join("data", "dt_" + cfg.run_uuid)
+        data_root=os.path.join("data", "dt_" + cfg.run_uuid),
+        debug=cfg.debug
     )
+    cfg.save_path = os.path.join("data", "dt_" + cfg.run_uuid)
     cfg.data_root = os.path.join("data", "dt_" + cfg.run_uuid)
     prepare_folds(cfg.fold_val, cfg.data_root)
-    
+
     cfg.data.train.data_root = cfg.data_root
     cfg.data.val.data_root = cfg.data_root
     cfg.data.test.data_root = cfg.data_root
