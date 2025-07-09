@@ -17,3 +17,4 @@ outputs/
 Dockerfile
 pointcept-torch2.5.0-cu12.4
 debug_*
+pointcept-*
