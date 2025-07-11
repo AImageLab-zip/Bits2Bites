@@ -1,19 +1,22 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-batch_size = 128            # to adjust
-batch_size_val = 128
-epoch = 100
-eval_epoch = 100
-num_worker = 16
+## BEST 
+
+batch_size = 8
+batch_size_val = 8
+epoch = 200
+eval_epoch = 200
+num_worker = 4
 empty_cache = False
 enable_amp = True
 clip_grad = 1.0
 fold_val = 1
 run_uuid = "aaaaaa"
 debug = False
+wandb_run_name= "default"
 
 dataset_type = "DentalDataset"
-data_root = "data/dental_landmarks"
+data_root = "data/dental_landmarks_mesh"
 num_classes_list = [3, 3, 4, 3, 2]   # class sizes
 
 data = dict(
@@ -25,10 +28,9 @@ data = dict(
             dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.95, 1.05]),
             dict(type="RandomShift", shift=((-0.02,0.02),)*3),
-            dict(type="RandomRotate",angle=[-1, 1],axis="z",center=[0, 0, 0],p=0.5,),
-            dict(type="RandomDropout", dropout_ratio=0.3, dropout_application_ratio=0.5),
-            dict(type="GridSample", grid_size=0.01, hash_type="fnv",
-                 mode="train", return_grid_coord=True),
+            dict(type="RandomRotate",angle=[-0.1, 0.1],axis="z",center=[0, 0, 0],p=0.5,),
+            dict(type="RandomDropout", dropout_ratio=0.5, dropout_application_ratio=0.5),
+            dict(type="GridSample", grid_size=0.01, hash_type="fnv", mode="train", return_grid_coord=True),
             dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
@@ -107,6 +109,7 @@ model = dict(
     type="MultiTaskClassifier",
     backbone_embed_dim=128,
     num_classes_list=num_classes_list,
+    stl_task=2,
     class_weights=[
         [0.7185, 0.7791, 3.0794],               # classe dx
         [0.7386, 0.8228, 2.3214],               # classe sx
@@ -127,14 +130,15 @@ model = dict(
     ),
 )
 
-optimizer = dict(type="AdamW", lr=0.0005, weight_decay=0.01)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.01)
 scheduler = dict(type="CosineAnnealingLR", total_steps=epoch)
 
 hooks = [
-    dict(type="CheckpointLoader"),
+    # dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
     dict(type="InformationWriter"),
     dict(type="MultiClsEvaluator"),
+    dict(type="CheckpointSaver", save_freq=None),
     # dict(type="PreciseEvaluator", test_last=False),       # test inference on "unseen data"
 ]
 

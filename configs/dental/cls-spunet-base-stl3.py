@@ -1,16 +1,19 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-batch_size = 16
-batch_size_val = 16
-epoch = 100
-eval_epoch = 100
-num_worker = 16
+## BEST 
+
+batch_size = 8
+batch_size_val = 8
+epoch = 200
+eval_epoch = 200
+num_worker = 4
 empty_cache = False
 enable_amp = True
 clip_grad = 1.0
 fold_val = 1
 run_uuid = "aaaaaa"
 debug = False
+wandb_run_name= "default"
 
 dataset_type = "DentalDataset"
 data_root = "data/dental_landmarks_mesh"
@@ -25,10 +28,9 @@ data = dict(
             dict(type="NormalizeCoord"),
             dict(type="RandomScale", scale=[0.95, 1.05]),
             dict(type="RandomShift", shift=((-0.02,0.02),)*3),
-            dict(type="RandomRotate",angle=[-1, 1],axis="z",center=[0, 0, 0],p=0.5,),
-            dict(type="RandomDropout", dropout_ratio=0.3, dropout_application_ratio=0.5),
-            dict(type="GridSample", grid_size=0.01, hash_type="fnv",
-                 mode="train", return_grid_coord=True),
+            dict(type="RandomRotate",angle=[-0.1, 0.1],axis="z",center=[0, 0, 0],p=0.5,),
+            dict(type="RandomDropout", dropout_ratio=0.5, dropout_application_ratio=0.5),
+            dict(type="GridSample", grid_size=0.01, hash_type="fnv", mode="train", return_grid_coord=True),
             dict(type="ShufflePoint"),
             dict(type="ToTensor"),
             dict(
@@ -102,11 +104,12 @@ data = dict(
     ),
 )
 
-
+# Model
 model = dict(
     type="MultiTaskClassifier",
     backbone_embed_dim=256,                 # SpUNet’s final feature size
     num_classes_list=num_classes_list,
+    stl_task=3,
     class_weights=[
         [0.7185, 0.7791, 3.0794],               # classe dx
         [0.7386, 0.8228, 2.3214],               # classe sx
@@ -129,11 +132,12 @@ optimizer = dict(type="SGD", lr=0.01, momentum=0.9, weight_decay=0.0001, nestero
 scheduler = dict(type="MultiStepLR", milestones=[0.6, 0.8], gamma=0.1)
 
 hooks = [
-    dict(type="CheckpointLoader"),
+    # dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
     dict(type="InformationWriter"),
     dict(type="MultiClsEvaluator"),
-    #dict(type="PreciseEvaluator", test_last=False),
+    dict(type="CheckpointSaver", save_freq=None),
+    # dict(type="PreciseEvaluator", test_last=False),       # test inference on "unseen data"
 ]
 
 test = dict(type="ClsTester")       # default tester prints per-head accuracy

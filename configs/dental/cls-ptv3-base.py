@@ -1,16 +1,19 @@
 _base_ = ["../_base_/default_runtime.py"]
 
-batch_size = 8            # to adjust
+## BEST 
+
+batch_size = 8
 batch_size_val = 8
-epoch = 100
-eval_epoch = 100
-num_worker = 16
+epoch = 200
+eval_epoch = 200
+num_worker = 4
 empty_cache = False
 enable_amp = True
 clip_grad = 1.0
 fold_val = 1
 run_uuid = "aaaaaa"
 debug = False
+wandb_run_name= "default"
 
 dataset_type = "DentalDataset"
 data_root = "data/dental_landmarks_mesh"
@@ -126,14 +129,15 @@ model = dict(
     ),
 )
 
-optimizer = dict(type="AdamW", lr=0.0005, weight_decay=0.01)
+optimizer = dict(type="AdamW", lr=0.0001, weight_decay=0.01)
 scheduler = dict(type="CosineAnnealingLR", total_steps=epoch)
 
 hooks = [
-    dict(type="CheckpointLoader"),
+    # dict(type="CheckpointLoader"),
     dict(type="IterationTimer"),
     dict(type="InformationWriter"),
     dict(type="MultiClsEvaluator"),
+    dict(type="CheckpointSaver", save_freq=None),
     # dict(type="PreciseEvaluator", test_last=False),       # test inference on "unseen data"
 ]
 
