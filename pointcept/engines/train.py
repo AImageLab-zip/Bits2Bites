@@ -254,7 +254,7 @@ class Trainer(TrainerBase):
             wandb.init(
                 project=self.cfg.wandb_project,
                 entity=self.cfg.wandb_entity,
-                name=f"{tag}/{name}",
+                name=self.cfg.wandb_run_name,
                 tags=[tag],
                 dir=self.cfg.save_path,
                 settings=wandb.Settings(api_key=self.cfg.wandb_key),

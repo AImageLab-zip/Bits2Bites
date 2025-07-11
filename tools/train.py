@@ -28,6 +28,7 @@ def main():
     cfg.wandb_project = os.environ.get("WANDB_PROJECT", "default_project")
     cfg.wandb_key = os.environ.get("WANDB_KEY", "no_key")
     cfg.wandb_entity = os.environ.get("WANDB_ENTITY", "default_entity")
+    cfg.wandb_run_name = os.environ.get("WANDB_RUN_NAME", "default")
 
     cfg.run_uuid = os.environ.get("PROJECT_UUID", "aaaaaa")
     cfg.dataset_type=dict(
