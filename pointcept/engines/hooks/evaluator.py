@@ -19,6 +19,7 @@ from .default import HookBase
 from .builder import HOOKS
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import time
 
 LABELS = ['classe_DX', 'classe_SX', 'morso_ant', 'trasversale', 'mediane']
 
@@ -30,6 +31,7 @@ class MultiClsEvaluator(HookBase):
     def before_train(self):
         if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
             wandb.define_metric("val/*", step_metric="Epoch")
+            wandb.define_metric("inference/*", step_metric="Epoch")
             wandb.define_metric("accuracy/*", step_metric="Epoch")
             wandb.define_metric("precision/*", step_metric="Epoch")
             wandb.define_metric("recall/*", step_metric="Epoch")
@@ -49,13 +51,17 @@ class MultiClsEvaluator(HookBase):
         targets = [[] for _ in range(num_tasks)]
         losses = [[] for _ in range(num_tasks)]
 
+        inference_times = []
         for i, input_dict in enumerate(self.trainer.val_loader):
             for key in input_dict:
                 if isinstance(input_dict[key], torch.Tensor):
                     input_dict[key] = input_dict[key].cuda(non_blocking=True)
 
+            start_time = time.time()
             with torch.no_grad():
                 output_dict = self.trainer.model(input_dict)
+            end_time = time.time()
+            inference_times.append(end_time - start_time)
 
             logits_list = output_dict["logits"]
             for j in range(num_tasks):
@@ -171,6 +177,13 @@ class MultiClsEvaluator(HookBase):
                         class_names=class_names
                     )
                 }, step=wandb.run.step)
+
+        # Log average inference time per batch
+        mean_time = np.mean(inference_times)
+        self.trainer.logger.info(f"Avg. Inference Time per Batch: {mean_time:.4f}s")
+
+        if self.trainer.cfg.enable_wandb:
+            wandb.log({"inference/mean_time": mean_time}, step=wandb.run.step)
 
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = acc_avg

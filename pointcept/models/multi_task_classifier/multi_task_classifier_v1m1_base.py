@@ -21,14 +21,14 @@ class MultiTaskClassifier(nn.Module):
         loss_type="ce",
         class_weights=None,
         label_smoothing=0.0,
-        weight_median=1
+        stl_task=-1
     ):
         super().__init__()
 
         self.backbone = build_model(backbone)
         self.num_tasks = len(num_classes_list)
         self.num_classes_list = list(num_classes_list)
-        self.weight_median=weight_median
+        self.stl_task=stl_task
 
         # one MLP head per task  (Linear-BN-ReLU-Drop-Linear)
         self.heads = nn.ModuleList()
@@ -83,9 +83,9 @@ class MultiTaskClassifier(nn.Module):
                 if loss_val.ndim > 0:
                     loss_val = loss_val.mean()
 
-                # Apply weight_median only to label_4 (i == 4)
-                if i == 4:
-                    loss_val = loss_val * self.weight_median
+                # kill loss for STL experiment
+                if self.stl_task != -1 and i != self.stl_task:
+                    loss_val = loss_val * 0
 
                 losses.append(loss_val)
                 out[f"loss_{i}"] = loss_val
