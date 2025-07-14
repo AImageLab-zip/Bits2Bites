@@ -92,7 +92,10 @@ class DentalDataset(Dataset):
 
         self.num_points = num_points
         self.uniform_sampling = uniform_sampling
-        self.transform = Compose(transform)
+        if not callable(transform):
+            self.transform = Compose(transform)
+        else:
+            self.transform = transform
         self.loop = loop if not test_mode else 1
 
         self.test_mode = test_mode
@@ -178,11 +181,6 @@ class DentalDataset(Dataset):
             "label_2":   np.array([lbl_ant],    dtype=np.int64),
             "label_3": np.array([lbl_trans],  dtype=np.int64),
             "label_4":    np.array([lbl_mid],    dtype=np.int64),
-
-            # convenience vector for downstream evaluation (to avoid updates to test pipeline)
-            "category": np.array(
-                [lbl_right, lbl_left, lbl_ant, lbl_trans, lbl_mid], dtype=np.int64
-            ),
         }
         return data_dict
 
@@ -199,41 +197,9 @@ class DentalDataset(Dataset):
 
     def _prepare_train_item(self, idx: int) -> dict:
         item = copy.deepcopy(self.data_cache[self.get_data_name(idx)])
-        transformed = self.transform(item)
+        return self.transform(item)
 
-        ## DEBUG EXPORT
-        if self.debug:
-            out_dir = Path("debug_output_json")
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"{self.get_data_name(idx)}.json"
-            
-            coords_norm = transformed["coord"]
-            if isinstance(coords_norm, torch.Tensor):
-                coords_norm = coords_norm.cpu().numpy()
-
-            coords_denorm = coords_norm * 50.0
-
-            objects = []
-            for i, point in enumerate(coords_denorm):
-                objects.append({
-                    "key": f"uuid_{len(coords_denorm) - 1 - i}",
-                    "class": "Debug",
-                    "coord": point.tolist()
-                })
-
-            json_data = {
-                "version": "1.1",
-                "description": "debug",
-                "key": self.get_data_name(idx),
-                "objects": objects
-            }
-
-            print(f"[DEBUG] Writing JSON to {out_path.resolve()}")
-            with open(out_path, "w") as f:
-                json.dump(json_data, f, indent=2)
-
-        return transformed
-
+    '''
     def _prepare_test_item(self, idx: int) -> dict:
         assert idx < len(self.data_list)
         base = copy.deepcopy(self.data_cache[self.get_data_name(idx)])
@@ -248,3 +214,14 @@ class DentalDataset(Dataset):
             category=category,
             name=self.get_data_name(idx),
         )
+    '''
+    
+    def _prepare_test_item(self, idx: int) -> dict:
+        item = copy.deepcopy(self.data_cache[self.get_data_name(idx)])
+        item = self.transform(item)
+        if "coord" not in item or item["coord"].shape[0] == 0:
+            raise ValueError(f"Empty coord array for sample {self.get_data_name(idx)}")
+
+        num_points = int(item["coord"].shape[0])
+        item["offset"] = torch.tensor([0, num_points], dtype=torch.long)
+        return item
