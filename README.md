@@ -14,7 +14,7 @@ We implemented:
 
 * ✅ **Custom data loader** for the `Bits2Bites` dataset
   → Located in: `pointcept/datasets/`
-  → Dataset info: [Bits2Bites Dataset (link coming soon)](ditto.ing.unimore.it/bits2bites)
+  → Dataset info: [Bits2Bites Dataset](https:/ditto.ing.unimore.it/bits2bites)
 
 * ✅ **Custom inference scripts**
   → Located in: `tools/`
@@ -30,7 +30,7 @@ We implemented:
 This repository supports the methods described in our MICCAI 2025 paper:
 📝 *"Bits2Bites: Intra-oral Scans Occlusal Classification"*
 **Authors**: L. Borghi, L. Lumetti, et al.
-📍 To be presented at [MICCAI 2025 – South Korea](odin-workshops.org)
+📍 To be presented at [ODIN - MICCAI 2025 – South Korea](https://odin-workshops.org)
 📄 [Paper (link coming soon)](#)
 
 ## 📦 Getting Started
