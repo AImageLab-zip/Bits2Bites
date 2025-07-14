@@ -14,7 +14,7 @@ We implemented:
 
 * ✅ **Custom data loader** for the `Bits2Bites` dataset
   → Located in: `pointcept/datasets/`
-  → Dataset info: [Bits2Bites Dataset](https:/ditto.ing.unimore.it/bits2bites)
+  → Dataset info: [Bits2Bites Dataset](https://ditto.ing.unimore.it/bits2bites)
 
 * ✅ **Custom inference scripts**
   → Located in: `tools/`
