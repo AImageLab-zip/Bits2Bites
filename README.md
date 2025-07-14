@@ -1,4 +1,4 @@
-# 🦷 ToothFairy4 Multi-Task Fork of Pointcept
+# 🦷 Bits2Bites
 
 This repository is a customized fork of [Pointcept](https://github.com/Pointcept/Pointcept) tailored for multi-task classification on 3D dental point cloud data. It includes several major extensions and changes that may affect the default behavior of Pointcept. We **recommend using this fork only to explore our implementation**.
 
@@ -12,9 +12,9 @@ We implemented:
 * ✅ **Custom configs**
   → Located in: `configs/`
 
-* ✅ **Custom data loader** for the `ToothFairy4` dataset
+* ✅ **Custom data loader** for the `Bits2Bites` dataset
   → Located in: `pointcept/datasets/`
-  → Dataset info: [ToothFairy4 Dataset (link coming soon)](#)
+  → Dataset info: [Bits2Bites Dataset (link coming soon)](ditto.ing.unimore.it/bits2bites)
 
 * ✅ **Custom inference scripts**
   → Located in: `tools/`
@@ -28,9 +28,9 @@ We implemented:
 ## 📄 Citation & Paper
 
 This repository supports the methods described in our MICCAI 2025 paper:
-📝 *"Multi-task Classification on 3D Dental Point Clouds with Task-aware Transformers"*
-**Authors**: Lorenzo Borghi et al., AImageLab
-📍 To be presented at [MICCAI 2025 – South Korea](#)
+📝 *"Bits2Bites: Intra-oral Scans Occlusal Classification"*
+**Authors**: L. Borghi, L. Lumetti, et al.
+📍 To be presented at [MICCAI 2025 – South Korea](odin-workshops.org)
 📄 [Paper (link coming soon)](#)
 
 ## 📦 Getting Started
