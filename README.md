@@ -31,7 +31,8 @@ This repository supports the methods described in our MICCAI 2025 paper:
 📝 *"Bits2Bites: Intra-oral Scans Occlusal Classification"*
 **Authors**: L. Borghi, L. Lumetti, et al.
 📍 To be presented at [ODIN - MICCAI 2025 – South Korea](https://odin-workshops.org)
-📄 [Paper (link coming soon)](#)
+📄 [Paper](https://openreview.net/forum?id=6KfC6LkKF4)
+🖼️ [Poster](https://odin-workshops.org/2025/posters/bits2bites_occlusal_classification.pdf)
 
 ## 📦 Getting Started
 
