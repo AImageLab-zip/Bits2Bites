@@ -8,13 +8,15 @@ exp
 exp_*
 weights
 data
-log
+*log*
 outputs/
 .vscode
 .idea
 */.DS_Store
 **/*.out
 Dockerfile
+*.out
+*.err
 pointcept-torch2.5.0-cu12.4
 debug_*
 pointcept-*

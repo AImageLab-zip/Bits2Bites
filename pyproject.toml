@@ -1,0 +1,101 @@
+[project]
+name = "bits2bites"
+version = "0.1.0"
+description = "Bits2Bites: intra-oral scans occlusal classification (Pointcept v1.7.0 fork)"
+requires-python = "==3.10.*"
+
+dependencies = [
+    # PyTorch CUDA 12.4 wheels
+    "torch==2.5.0",
+    "torchvision==0.20.0",
+    "torchaudio==2.5.0",
+
+    # Build tools needed by local/native packages
+    "setuptools",
+    "wheel",
+    "packaging",
+    "ninja",
+
+    # Base Python/runtime deps
+    "numpy<2",
+    "scipy",
+    "pandas",
+    "scikit-learn",
+    "trimesh",
+    "addict",
+    "yapf",
+    "pyyaml",
+    "h5py",
+    "einops",
+    "plyfile",
+    "termcolor",
+    "timm",
+    "ftfy",
+    "regex",
+    "tqdm",
+    "matplotlib",
+    "tensorboard",
+    "tensorboardx",
+    "wandb",
+    "open3d",
+    "black",
+    # Keep the Hugging Face stack pinned; latest releases have repeatedly
+    # broken import-time compatibility with the PyTorch/CUDA stack here.
+    "transformers==4.46.3",
+    "peft==0.13.2",
+    "accelerate==1.1.1",
+]
+
+[project.optional-dependencies]
+# GPU dependencies that are installable as wheels.
+# Local CUDA extensions are intentionally NOT listed here.
+gpu = [
+    "torch-scatter",
+    "torch-cluster",
+    "torch-sparse",
+    "torch-geometric",
+    "spconv-cu124",
+]
+
+# Optional: only needed to run PTv3 with enable_flash=True.
+# Dental configs use enable_flash=False, so this can usually be skipped.
+flash = [
+    "flash-attn",
+]
+
+[tool.uv]
+# These packages either compile against torch or are sensitive to build isolation.
+# Local ops are installed manually with `uv pip install ... --no-build-isolation`.
+no-build-isolation-package = [
+    "torch-scatter",
+    "torch-cluster",
+    "torch-sparse",
+    "flash-attn",
+]
+
+# --- package indexes ---------------------------------------------------------
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[[tool.uv.index]]
+name = "pyg-cu124"
+url = "https://data.pyg.org/whl/torch-2.5.0+cu124.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124" }]
+torchvision = [{ index = "pytorch-cu124" }]
+torchaudio = [{ index = "pytorch-cu124" }]
+
+torch-scatter = [{ index = "pyg-cu124" }]
+torch-cluster = [{ index = "pyg-cu124" }]
+torch-sparse = [{ index = "pyg-cu124" }]
+
+[tool.setuptools]
+# This repo is used as a source checkout.
+# We run tools/scripts in place rather than installing Bits2Bites as a package.
+py-modules = []

@@ -14,10 +14,11 @@ RESUME=false
 NUM_GPU=None
 NUM_MACHINE=1
 DIST_URL="auto"
+DATA_ROOT="None"
 
 OPTIONS_LIST=()
 
-while getopts "p:d:c:n:w:g:m:o:r:" opt; do
+while getopts "p:d:c:n:w:g:m:r:e:" opt; do
   case $opt in
     p)
       PYTHON=$OPTARG
@@ -43,8 +44,8 @@ while getopts "p:d:c:n:w:g:m:o:r:" opt; do
     m)
       NUM_MACHINE=$OPTARG
       ;;
-    o)
-      OPTIONS_LIST+=("$OPTARG")
+    e)
+      DATA_ROOT=$OPTARG
       ;;
     \?)
       echo "Invalid option: -$OPTARG"
@@ -106,12 +107,29 @@ for opt in "${OPTIONS_LIST[@]}"; do
   OPTION_ARGS+=("$opt")
 done
 
+DATA_ROOT_OPTS=""
+if [ "${DATA_ROOT}" != "None" ]
+then
+  DATA_ROOT_OPTS="data.train.data_root=$DATA_ROOT data.val.data_root=$DATA_ROOT data.test.data_root=$DATA_ROOT"
+fi
+
 echo " =========> RUN TASK <========="
 ulimit -n 65536
-$PYTHON "$CODE_DIR/tools/$TRAIN_CODE" \
-  --config-file "$CONFIG_DIR" \
-  --num-gpus "$NUM_GPU" \
-  --num-machines "$NUM_MACHINE" \
-  --machine-rank "${SLURM_NODEID:-0}" \
-  --dist-url "$DIST_URL" \
-  $(for o in "${OPTION_ARGS[@]}"; do echo --options "$o"; done)
+if [ "${WEIGHT}" = "None" ]
+then
+    $PYTHON "$CODE_DIR"/tools/$TRAIN_CODE \
+    --config-file "$CONFIG_DIR" \
+    --num-gpus "$NUM_GPU" \
+    --num-machines "$NUM_MACHINE" \
+    --machine-rank ${SLURM_NODEID:-0} \
+    --dist-url ${DIST_URL} \
+    --options save_path="$EXP_DIR" $DATA_ROOT_OPTS
+else
+    $PYTHON "$CODE_DIR"/tools/$TRAIN_CODE \
+    --config-file "$CONFIG_DIR" \
+    --num-gpus "$NUM_GPU" \
+    --num-machines "$NUM_MACHINE" \
+    --machine-rank ${SLURM_NODEID:-0} \
+    --dist-url ${DIST_URL} \
+    --options save_path="$EXP_DIR" resume="$RESUME" weight="$WEIGHT" $DATA_ROOT_OPTS
+fi

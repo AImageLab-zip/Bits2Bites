@@ -1,16 +1,24 @@
 """
 Evaluate Hook
 
-Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
+Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com), Yujia Zhang (yujia.zhang.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
 
+import time
+
 import numpy as np
-import wandb
 import torch
 import torch.distributed as dist
 import pointops
+import wandb
 from uuid import uuid4
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+)
 
 import pointcept.utils.comm as comm
 from pointcept.utils.misc import intersection_and_union_gpu
@@ -189,14 +197,214 @@ class MultiClsEvaluator(HookBase):
         self.trainer.comm_info["current_metric_value"] = acc_avg
         self.trainer.comm_info["current_metric_name"] = "avg_accuracy"
 
+# Bits2Bites: default English names for the five occlusal tasks, in the order of
+# ``model.num_classes_list``. Override per config via ``data.names`` if desired.
+DEFAULT_TASK_NAMES = [
+    "right_occ",
+    "left_occ",
+    "anterior_bite",
+    "transverse_bite",
+    "midline",
+]
+
+
+def get_task_names(cfg, num_tasks):
+    """Resolve human-readable task names from the config, falling back to
+    sensible defaults for the five-task occlusal setup, then to ``task_{i}``."""
+    names = None
+    if hasattr(cfg, "data") and cfg.data.get("names", None) is not None:
+        names = cfg.data.names
+    elif cfg.model.get("task_names", None) is not None:
+        names = cfg.model.task_names
+    if names is None or len(names) != num_tasks:
+        names = (
+            DEFAULT_TASK_NAMES
+            if num_tasks == len(DEFAULT_TASK_NAMES)
+            else [f"task_{i}" for i in range(num_tasks)]
+        )
+    return names
+
+
+def compute_multicls_metrics(predictions, targets, num_tasks):
+    """Per-task macro accuracy/precision/recall/F1 (ignoring label == -1) plus
+    their averages across tasks. Shared by MultiClsEvaluator and MultiClsTester."""
+    per_task = {"accuracy": [], "precision": [], "recall": [], "f1": []}
+    for j in range(num_tasks):
+        y_pred = np.asarray(predictions[j])
+        y_true = np.asarray(targets[j])
+        valid = y_true != -1
+        y_pred, y_true = y_pred[valid], y_true[valid]
+        per_task["accuracy"].append(accuracy_score(y_true, y_pred))
+        per_task["precision"].append(
+            precision_score(y_true, y_pred, average="macro", zero_division=0)
+        )
+        per_task["recall"].append(
+            recall_score(y_true, y_pred, average="macro", zero_division=0)
+        )
+        per_task["f1"].append(
+            f1_score(y_true, y_pred, average="macro", zero_division=0)
+        )
+    avg = {k: (sum(v) / num_tasks if num_tasks else 0.0) for k, v in per_task.items()}
+    return per_task, avg
+
+
 @HOOKS.register_module()
-class ClsEvaluator(HookBase):
+class MultiClsEvaluator(HookBase):
+    """Validation hook for the Bits2Bites multi-task classifier.
+
+    The model returns ``output_dict["logits"]`` (one tensor per task) and, when
+    labels are present, ``loss`` / ``loss_{j}``. This hook reports per-task and
+    task-averaged accuracy/precision/recall/macro-F1 on the validation fold and
+    logs them to tensorboard and (optionally) wandb.
+    """
+
+    def before_train(self):
+        if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
+            for metric in ("val", "inference", "accuracy", "precision", "recall", "f1"):
+                wandb.define_metric(f"{metric}/*", step_metric="Epoch")
+            wandb.define_metric("confusion_matrix/*", step_metric="Epoch")
+
     def after_epoch(self):
         if self.trainer.cfg.evaluate:
             self.eval()
 
     def eval(self):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        self.trainer.model.eval()
+
+        num_tasks = len(self.trainer.cfg.model.num_classes_list)
+        task_names = get_task_names(self.trainer.cfg, num_tasks)
+        predictions = [[] for _ in range(num_tasks)]
+        targets = [[] for _ in range(num_tasks)]
+
+        inference_times = []
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            for key in input_dict:
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+
+            start_time = time.time()
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+            inference_times.append(time.time() - start_time)
+
+            logits_list = output_dict["logits"]
+            for j in range(num_tasks):
+                predictions[j].extend(logits_list[j].argmax(dim=1).cpu().numpy())
+                targets[j].extend(input_dict[f"label_{j}"].cpu().numpy())
+
+            self.trainer.storage.put_scalar("val_loss", output_dict["loss"].item())
+            for j in range(num_tasks):
+                self.trainer.storage.put_scalar(
+                    f"val_loss_{j}", output_dict[f"loss_{j}"].item()
+                )
+
+            self.trainer.logger.info(
+                f"Test: [{i + 1}/{len(self.trainer.val_loader)}] "
+                f"Loss: {output_dict['loss'].item():.4f} "
+                + " ".join(
+                    f"loss_{j}: {output_dict[f'loss_{j}'].item():.4f}"
+                    for j in range(num_tasks)
+                )
+            )
+
+        current_epoch = self.trainer.epoch + 1
+        val_loss_avg = self.trainer.storage.history("val_loss").avg
+        val_loss_per_task = {
+            j: self.trainer.storage.history(f"val_loss_{j}").avg
+            for j in range(num_tasks)
+        }
+
+        per_task, avg = compute_multicls_metrics(predictions, targets, num_tasks)
+        for j in range(num_tasks):
+            self.trainer.logger.info(
+                f"Task {j} ({task_names[j]}): "
+                f"Acc: {per_task['accuracy'][j]:.4f} | "
+                f"Prec: {per_task['precision'][j]:.4f} | "
+                f"Rec: {per_task['recall'][j]:.4f} | "
+                f"F1: {per_task['f1'][j]:.4f}"
+            )
+            if self.trainer.writer is not None:
+                for metric in ("accuracy", "precision", "recall", "f1"):
+                    self.trainer.writer.add_scalar(
+                        f"val/task_{j}/{metric}", per_task[metric][j], current_epoch
+                    )
+                self.trainer.writer.add_scalar(
+                    f"val/loss_{j}", val_loss_per_task[j], current_epoch
+                )
+
+        self.trainer.logger.info(
+            f"Aggregated metrics: Acc: {avg['accuracy']:.4f} | "
+            f"Prec: {avg['precision']:.4f} | Rec: {avg['recall']:.4f} | "
+            f"F1: {avg['f1']:.4f}"
+        )
+
+        if self.trainer.writer is not None:
+            for metric in ("accuracy", "precision", "recall", "f1"):
+                self.trainer.writer.add_scalar(
+                    f"val/avg/{metric}", avg[metric], current_epoch
+                )
+            self.trainer.writer.add_scalar("val/loss", val_loss_avg, current_epoch)
+
+        if self.trainer.cfg.enable_wandb:
+            wandb.log(
+                {
+                    "Epoch": current_epoch,
+                    "val/loss": val_loss_avg,
+                    **{
+                        f"val/loss_{task_names[j]}": val_loss_per_task[j]
+                        for j in range(num_tasks)
+                    },
+                    **{f"{metric}/avg": avg[metric] for metric in avg},
+                    **{
+                        f"{metric}/task_{task_names[j]}": per_task[metric][j]
+                        for metric in per_task
+                        for j in range(num_tasks)
+                    },
+                },
+                step=wandb.run.step,
+            )
+            for j in range(num_tasks):
+                y_pred = np.asarray(predictions[j])
+                y_true = np.asarray(targets[j])
+                class_count = self.trainer.cfg.model.num_classes_list[j]
+                valid = (y_true != -1) & (y_true < class_count)
+                wandb.log(
+                    {
+                        f"confusion_matrix/task_{task_names[j]}": wandb.plot.confusion_matrix(
+                            probs=None,
+                            y_true=y_true[valid],
+                            preds=y_pred[valid],
+                            class_names=[f"class_{k}" for k in range(class_count)],
+                        )
+                    },
+                    step=wandb.run.step,
+                )
+
+        mean_time = float(np.mean(inference_times))
+        self.trainer.logger.info(f"Avg. Inference Time per Batch: {mean_time:.4f}s")
+        if self.trainer.cfg.enable_wandb:
+            wandb.log({"inference/mean_time": mean_time}, step=wandb.run.step)
+
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+        self.trainer.comm_info["current_metric_value"] = avg["accuracy"]
+        self.trainer.comm_info["current_metric_name"] = "avg_accuracy"
+
+
+@HOOKS.register_module()
+class ClsEvaluator(HookBase):
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def before_train(self):
+        if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
+            wandb.define_metric("val/*", step_metric="Epoch")
+
+    def eval(self):
+        self.trainer.logger.info(
+            ">>>>>>>>>>>>>>>> Start Evaluation (Classification) >>>>>>>>>>>>>>>>"
+        )
         self.trainer.model.eval()
         for i, input_dict in enumerate(self.trainer.val_loader):
             for key in input_dict.keys():
@@ -223,7 +431,6 @@ class ClsEvaluator(HookBase):
                 union.cpu().numpy(),
                 target.cpu().numpy(),
             )
-            # Here there is no need to sync since sync happened in dist.all_reduce
             self.trainer.storage.put_scalar("val_intersection", intersection)
             self.trainer.storage.put_scalar("val_union", union)
             self.trainer.storage.put_scalar("val_target", target)
@@ -234,38 +441,82 @@ class ClsEvaluator(HookBase):
                     iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
                 )
             )
+
+        # Strict Metric Calculation & Ordering
         loss_avg = self.trainer.storage.history("val_loss").avg
-        intersection = self.trainer.storage.history("val_intersection").total
-        union = self.trainer.storage.history("val_union").total
-        target = self.trainer.storage.history("val_target").total
-        iou_class = intersection / (union + 1e-10)
-        acc_class = intersection / (target + 1e-10)
+        intersection = self.trainer.storage.history("val_intersection").total  # TP
+        union = self.trainer.storage.history("val_union").total  # TP + FP + FN
+        target = self.trainer.storage.history("val_target").total  # TP + FN (GT)
+
+        # Derived count: TP + FP = (TP + FP + FN) + TP - (TP + FN)
+        area_output = union + intersection - target
+        epsilon = 1e-10
+
+        # Per-Class Calculation
+        iou_class = intersection / (union + epsilon)
+        acc_class = intersection / (target + epsilon)  # Recall
+        precision_class = intersection / (area_output + epsilon)
+        f1_class = (
+            2 * (precision_class * acc_class) / (precision_class + acc_class + epsilon)
+        )
+
+        # Global Calculation
         m_iou = np.mean(iou_class)
-        m_acc = np.mean(acc_class)
-        all_acc = sum(intersection) / (sum(target) + 1e-10)
+        m_acc = np.mean(acc_class)  # Macro Recall
+        m_precision = np.mean(precision_class)  # Macro Precision
+        macro_f1 = np.mean(f1_class)  # Macro F1
+
+        total_tp = sum(intersection)
+        total_target = sum(target)
+        all_acc = total_tp / (total_target + epsilon)  # Overall Accuracy
+
+        # Log Output - Global (Order: mIoU, macroF1, mAcc, mPrecision, allAcc)
         self.trainer.logger.info(
-            "Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.".format(
-                m_iou, m_acc, all_acc
+            "Val result: mIoU/macroF1/mAcc/mPrecision/allAcc "
+            "{:.4f}/{:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                m_iou, macro_f1, m_acc, m_precision, all_acc
             )
         )
+
+        # Log Output - Per Class (Order: iou, acc, precision, f1)
         for i in range(self.trainer.cfg.data.num_classes):
             self.trainer.logger.info(
-                "Class_{idx}-{name} Result: iou/accuracy {iou:.4f}/{accuracy:.4f}".format(
+                "Class_{idx}-{name} Result: iou/acc/precision/f1 "
+                "{iou:.4f}/{acc:.4f}/{prec:.4f}/{f1:.4f}".format(
                     idx=i,
                     name=self.trainer.cfg.data.names[i],
                     iou=iou_class[i],
-                    accuracy=acc_class[i],
+                    acc=acc_class[i],
+                    prec=precision_class[i],
+                    f1=f1_class[i],
                 )
             )
+
         current_epoch = self.trainer.epoch + 1
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
             self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
+            self.trainer.writer.add_scalar("val/macroF1", macro_f1, current_epoch)
             self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
+            self.trainer.writer.add_scalar("val/mPrecision", m_precision, current_epoch)
             self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+
+            if self.trainer.cfg.enable_wandb:
+                wandb.log(
+                    {
+                        "Epoch": current_epoch,
+                        "val/loss": loss_avg,
+                        "val/mIoU": m_iou,
+                        "val/macroF1": macro_f1,
+                        "val/mAcc": m_acc,
+                        "val/mPrecision": m_precision,
+                        "val/allAcc": all_acc,
+                    },
+                    step=wandb.run.step,
+                )
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
-        self.trainer.comm_info["current_metric_value"] = all_acc  # save for saver
-        self.trainer.comm_info["current_metric_name"] = "allAcc"  # save for saver
+        self.trainer.comm_info["current_metric_value"] = all_acc
+        self.trainer.comm_info["current_metric_name"] = "allAcc"
 
     def after_train(self):
         self.trainer.logger.info(
@@ -275,8 +526,8 @@ class ClsEvaluator(HookBase):
 
 @HOOKS.register_module()
 class SemSegEvaluator(HookBase):
-    def __init__(self, write_cls_iou=False):
-        self.write_cls_iou = write_cls_iou
+    def __init__(self, write_cls_metrics=False):
+        self.write_cls_metrics = write_cls_metrics
 
     def before_train(self):
         if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
@@ -287,7 +538,9 @@ class SemSegEvaluator(HookBase):
             self.eval()
 
     def eval(self):
-        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        self.trainer.logger.info(
+            ">>>>>>>>>>>>>>>> Start Evaluation (Segmentation) >>>>>>>>>>>>>>>>"
+        )
         self.trainer.model.eval()
         for i, input_dict in enumerate(self.trainer.val_loader):
             for key in input_dict.keys():
@@ -299,10 +552,24 @@ class SemSegEvaluator(HookBase):
             loss = output_dict["loss"]
             pred = output.max(1)[1]
             segment = input_dict["segment"]
+
+            # Handle inverse mapping if needed
             if "inverse" in input_dict.keys():
                 assert "origin_segment" in input_dict.keys()
                 pred = pred[input_dict["inverse"]]
                 segment = input_dict["origin_segment"]
+            elif "origin_coord" in input_dict.keys():
+                assert "origin_segment" in input_dict.keys()
+                idx, _ = pointops.knn_query(
+                    1,
+                    input_dict["coord"].float(),
+                    input_dict["offset"].int(),
+                    input_dict["origin_coord"].float(),
+                    input_dict["origin_offset"].int(),
+                )
+                pred = pred[idx.flatten().long()]
+                segment = input_dict["origin_segment"]
+
             intersection, union, target = intersection_and_union_gpu(
                 pred,
                 segment,
@@ -318,80 +585,111 @@ class SemSegEvaluator(HookBase):
                 union.cpu().numpy(),
                 target.cpu().numpy(),
             )
+
             # Here there is no need to sync since sync happened in dist.all_reduce
             self.trainer.storage.put_scalar("val_intersection", intersection)
             self.trainer.storage.put_scalar("val_union", union)
             self.trainer.storage.put_scalar("val_target", target)
             self.trainer.storage.put_scalar("val_loss", loss.item())
+
             info = "Test: [{iter}/{max_iter}] ".format(
                 iter=i + 1, max_iter=len(self.trainer.val_loader)
             )
             if "origin_coord" in input_dict.keys():
                 info = "Interp. " + info
-            self.trainer.logger.info(
-                info
-                + "Loss {loss:.4f} ".format(
-                    iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
-                )
-            )
+            self.trainer.logger.info(info + "Loss {loss:.4f} ".format(loss=loss.item()))
+
         loss_avg = self.trainer.storage.history("val_loss").avg
         intersection = self.trainer.storage.history("val_intersection").total
         union = self.trainer.storage.history("val_union").total
         target = self.trainer.storage.history("val_target").total
-        iou_class = intersection / (union + 1e-10)
-        acc_class = intersection / (target + 1e-10)
+
+        epsilon = 1e-10
+        area_output = union + intersection - target
+
+        # Per-Class Calculation
+        iou_class = intersection / (union + epsilon)
+        acc_class = intersection / (target + epsilon)  # Recall
+        precision_class = intersection / (area_output + epsilon)  # Precision
+        f1_class = (
+            2 * (precision_class * acc_class) / (precision_class + acc_class + epsilon)
+        )
+
+        # Global Calculation
         m_iou = np.mean(iou_class)
         m_acc = np.mean(acc_class)
-        all_acc = sum(intersection) / (sum(target) + 1e-10)
+        m_precision = np.mean(precision_class)
+        macro_f1 = np.mean(f1_class)
+
+        total_tp = sum(intersection)
+        total_target = sum(target)
+        all_acc = total_tp / (total_target + epsilon)
+
+        # Log Output - Global (Order: mIoU, macroF1, mAcc, mPrecision, allAcc)
         self.trainer.logger.info(
-            "Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.".format(
-                m_iou, m_acc, all_acc
+            "Val result: mIoU/macroF1/mAcc/mPrecision/allAcc "
+            "{:.4f}/{:.4f}/{:.4f}/{:.4f}/{:.4f}.".format(
+                m_iou, macro_f1, m_acc, m_precision, all_acc
             )
         )
+
+        # Log Output - Per Class (Order: iou, acc, precision, f1)
         for i in range(self.trainer.cfg.data.num_classes):
             self.trainer.logger.info(
-                "Class_{idx}-{name} Result: iou/accuracy {iou:.4f}/{accuracy:.4f}".format(
+                "Class_{idx}-{name} Metrics: IoU={iou:.4f}, accuracy={acc:.4f}, "
+                "precision={prec:.4f}, F1={f1:.4f}".format(
                     idx=i,
                     name=self.trainer.cfg.data.names[i],
                     iou=iou_class[i],
-                    accuracy=acc_class[i],
+                    acc=acc_class[i],
+                    prec=precision_class[i],
+                    f1=f1_class[i],
                 )
             )
+
         current_epoch = self.trainer.epoch + 1
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
             self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
+            self.trainer.writer.add_scalar("val/macroF1", macro_f1, current_epoch)
             self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
+            self.trainer.writer.add_scalar("val/mPrecision", m_precision, current_epoch)
             self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+
             if self.trainer.cfg.enable_wandb:
                 wandb.log(
                     {
-                        "Epoch": current_epoch,
                         "val/loss": loss_avg,
                         "val/mIoU": m_iou,
+                        "val/macroF1": macro_f1,
                         "val/mAcc": m_acc,
+                        "val/mPrecision": m_precision,
                         "val/allAcc": all_acc,
+                        "Epoch": current_epoch,
                     },
                     step=wandb.run.step,
                 )
-            if self.write_cls_iou:
+
+            if self.write_cls_metrics:
                 for i in range(self.trainer.cfg.data.num_classes):
+                    name = self.trainer.cfg.data.names[i]
                     self.trainer.writer.add_scalar(
-                        f"val/cls_{i}-{self.trainer.cfg.data.names[i]} IoU",
-                        iou_class[i],
-                        current_epoch,
+                        f"val/cls_{i}-{name}_IoU", iou_class[i], current_epoch
                     )
-                if self.trainer.cfg.enable_wandb:
-                    for i in range(self.trainer.cfg.data.num_classes):
+                    self.trainer.writer.add_scalar(
+                        f"val/cls_{i}-{name}_F1", f1_class[i], current_epoch
+                    )
+
+                    if self.trainer.cfg.enable_wandb:
                         wandb.log(
                             {
+                                f"val/cls_{i}-{name}_IoU": iou_class[i],
+                                f"val/cls_{i}-{name}_F1": f1_class[i],
                                 "Epoch": current_epoch,
-                                f"val/cls_{i}-{self.trainer.cfg.data.names[i]} IoU": iou_class[
-                                    i
-                                ],
                             },
                             step=wandb.run.step,
                         )
+
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = m_iou  # save for saver
         self.trainer.comm_info["current_metric_name"] = "mIoU"  # save for saver
@@ -630,7 +928,7 @@ class InsSegEvaluator(HookBase):
                         y_true_sorted_cumsum = np.cumsum(y_true_sorted)
 
                         # unique thresholds
-                        (thresholds, unique_indices) = np.unique(
+                        thresholds, unique_indices = np.unique(
                             y_score_sorted, return_index=True
                         )
                         num_prec_recall = len(unique_indices) + 1
@@ -707,11 +1005,12 @@ class InsSegEvaluator(HookBase):
     def eval(self):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         self.trainer.model.eval()
-        scenes = []
+        scenes = {}
         for i, input_dict in enumerate(self.trainer.val_loader):
             assert (
                 len(input_dict["offset"]) == 1
             )  # currently only support bs 1 for each GPU
+            data_name = input_dict.pop("name")[0]
             for key in input_dict.keys():
                 if isinstance(input_dict[key], torch.Tensor):
                     input_dict[key] = input_dict[key].cuda(non_blocking=True)
@@ -739,7 +1038,7 @@ class InsSegEvaluator(HookBase):
             gt_instances, pred_instance = self.associate_instances(
                 output_dict, segment, instance
             )
-            scenes.append(dict(gt=gt_instances, pred=pred_instance))
+            scenes[data_name] = dict(gt=gt_instances, pred=pred_instance)
 
             self.trainer.storage.put_scalar("val_loss", loss.item())
             self.trainer.logger.info(
@@ -752,42 +1051,319 @@ class InsSegEvaluator(HookBase):
         loss_avg = self.trainer.storage.history("val_loss").avg
         comm.synchronize()
         scenes_sync = comm.gather(scenes, dst=0)
-        scenes = [scene for scenes_ in scenes_sync for scene in scenes_]
-        ap_scores = self.evaluate_matches(scenes)
-        all_ap = ap_scores["all_ap"]
-        all_ap_50 = ap_scores["all_ap_50%"]
-        all_ap_25 = ap_scores["all_ap_25%"]
-        self.trainer.logger.info(
-            "Val result: mAP/AP50/AP25 {:.4f}/{:.4f}/{:.4f}.".format(
-                all_ap, all_ap_50, all_ap_25
-            )
-        )
-        for i, label_name in enumerate(self.valid_class_names):
-            ap = ap_scores["classes"][label_name]["ap"]
-            ap_50 = ap_scores["classes"][label_name]["ap50%"]
-            ap_25 = ap_scores["classes"][label_name]["ap25%"]
+
+        if comm.is_main_process():
+            scenes = {}
+            for _ in range(len(scenes_sync)):
+                r = scenes_sync.pop()
+                scenes.update(r)
+                del r
+            scenes = list(scenes.values())
+            ap_scores = self.evaluate_matches(scenes)
+            all_ap = ap_scores["all_ap"]
+            all_ap_50 = ap_scores["all_ap_50%"]
+            all_ap_25 = ap_scores["all_ap_25%"]
             self.trainer.logger.info(
-                "Class_{idx}-{name} Result: AP/AP50/AP25 {AP:.4f}/{AP50:.4f}/{AP25:.4f}".format(
-                    idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25
+                "Val result: mAP/AP50/AP25 {:.4f}/{:.4f}/{:.4f}.".format(
+                    all_ap, all_ap_50, all_ap_25
                 )
             )
+            for i, label_name in enumerate(self.valid_class_names):
+                ap = ap_scores["classes"][label_name]["ap"]
+                ap_50 = ap_scores["classes"][label_name]["ap50%"]
+                ap_25 = ap_scores["classes"][label_name]["ap25%"]
+                self.trainer.logger.info(
+                    "Class_{idx}-{name} Result: AP/AP50/AP25 {AP:.4f}/{AP50:.4f}/{AP25:.4f}".format(
+                        idx=i, name=label_name, AP=ap, AP50=ap_50, AP25=ap_25
+                    )
+                )
+            current_epoch = self.trainer.epoch + 1
+            if self.trainer.writer is not None:
+                self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
+                self.trainer.writer.add_scalar("val/mAP", all_ap, current_epoch)
+                self.trainer.writer.add_scalar("val/AP50", all_ap_50, current_epoch)
+                self.trainer.writer.add_scalar("val/AP25", all_ap_25, current_epoch)
+                if self.trainer.cfg.enable_wandb:
+                    wandb.log(
+                        {
+                            "Epoch": current_epoch,
+                            "val/loss": loss_avg,
+                            "val/mAP": all_ap,
+                            "val/AP50": all_ap_50,
+                            "val/AP25": all_ap_25,
+                        },
+                        step=wandb.run.step,
+                    )
+            self.trainer.logger.info(
+                "<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<"
+            )
+            self.trainer.comm_info["current_metric_value"] = all_ap_50  # save for saver
+            self.trainer.comm_info["current_metric_name"] = "AP50"  # save for saver
+
+
+@HOOKS.register_module()
+class ShapeNetPartSegEvaluator(HookBase):
+    def __init__(self, write_cls_iou=False):
+        self.write_cls_iou = write_cls_iou
+
+    def before_train(self):
+        if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
+            wandb.define_metric("val/*", step_metric="Epoch")
+
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(
+            ">>>>>>>>>>>>>>>> Start Part Segmentation Evaluation >>>>>>>>>>>>>>>>"
+        )
+        self.trainer.model.eval()
+
+        num_categories = len(self.trainer.val_loader.dataset.categories)
+        total_iou_category = torch.zeros(num_categories, device="cuda")
+        total_iou_count = torch.zeros(num_categories, device="cuda")
+
+        # Iterate over all batches in the validation loader
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            for key in input_dict.keys():
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+
+            pred_scores = output_dict["seg_logits"]
+            pred_labels = torch.argmax(pred_scores, dim=-1)
+
+            segment = input_dict["segment"]
+            cls_token = input_dict["cls_token"][0].cpu().numpy()
+
+            if "inverse" in input_dict.keys():
+                assert (
+                    "origin_segment" in input_dict.keys()
+                ), "origin_segment must be provided with inverse"
+                pred_labels = pred_labels[input_dict["inverse"]]
+                segment = input_dict["origin_segment"]
+
+            category_name = self.trainer.val_loader.dataset.categories[cls_token]
+            parts_idx = self.trainer.val_loader.dataset.category2part[category_name]
+            parts_iou = torch.zeros(len(parts_idx), device="cuda")
+            for k, part_id in enumerate(parts_idx):
+                if (torch.sum(segment == part_id) == 0) and (
+                    torch.sum(pred_labels == part_id) == 0
+                ):
+                    parts_iou[k] = (
+                        1.0  # This part is correctly not predicted and not present
+                    )
+                else:
+                    intersection = torch.sum(
+                        (segment == part_id) & (pred_labels == part_id)
+                    )
+                    union = torch.sum((segment == part_id) | (pred_labels == part_id))
+                    parts_iou[k] = intersection / (union + 1e-10)
+
+            sample_miou = parts_iou.mean()
+
+            total_iou_category[cls_token] += sample_miou
+            total_iou_count[cls_token] += 1
+
+        if comm.get_world_size() > 1:
+            dist.all_reduce(total_iou_category), dist.all_reduce(total_iou_count)
+        total_iou_count = total_iou_count.cpu().numpy()
+        total_iou_category = total_iou_category.cpu().numpy()
+        # Instance-wise mIoU: average of all sample mIoUs
+        ins_mIoU = total_iou_category.sum() / (total_iou_count.sum() + 1e-10)
+        # Category-wise mIoU: average of per-category mIoUs
+        iou_per_cat = total_iou_category / (total_iou_count + 1e-10)
+        # Only average over categories that were actually present in the validation set
+        cat_mIoU = np.mean(iou_per_cat[total_iou_count > 0])
+
+        self.trainer.logger.info(
+            "Val result: ins.mIoU/cat.mIoU {:.4f}/{:.4f}.".format(ins_mIoU, cat_mIoU)
+        )
+
+        # Log detailed results for each category
+        for i in range(num_categories):
+            if total_iou_count[i] > 0:
+                self.trainer.logger.info(
+                    "Class_{idx}-{name} Result: iou_cat/num_sample {iou_cat:.4f}/{iou_count:.0f}".format(
+                        idx=i,
+                        name=self.trainer.val_loader.dataset.categories[i],
+                        iou_cat=iou_per_cat[i],
+                        iou_count=total_iou_count[i],
+                    )
+                )
+
         current_epoch = self.trainer.epoch + 1
         if self.trainer.writer is not None:
-            self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
-            self.trainer.writer.add_scalar("val/mAP", all_ap, current_epoch)
-            self.trainer.writer.add_scalar("val/AP50", all_ap_50, current_epoch)
-            self.trainer.writer.add_scalar("val/AP25", all_ap_25, current_epoch)
+            self.trainer.writer.add_scalar("val/ins_mIoU", ins_mIoU, current_epoch)
+            self.trainer.writer.add_scalar("val/cat_mIoU", cat_mIoU, current_epoch)
             if self.trainer.cfg.enable_wandb:
                 wandb.log(
                     {
                         "Epoch": current_epoch,
-                        "val/loss": loss_avg,
-                        "val/mAP": all_ap,
-                        "val/AP50": all_ap_50,
-                        "val/AP25": all_ap_25,
+                        "val/ins_mIoU": ins_mIoU,
+                        "val/cat_mIoU": cat_mIoU,
                     },
                     step=wandb.run.step,
                 )
+
+            if self.write_cls_iou:
+                for i in range(num_categories):
+                    if total_iou_count[i] > 0:
+                        category_name = self.trainer.val_loader.dataset.categories[i]
+                        self.trainer.writer.add_scalar(
+                            f"val/cls_{i}-{category_name}_IoU",
+                            iou_per_cat[i],
+                            current_epoch,
+                        )
+
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
-        self.trainer.comm_info["current_metric_value"] = all_ap_50  # save for saver
-        self.trainer.comm_info["current_metric_name"] = "AP50"  # save for saver
+
+        # Save the primary metric for checkpointing logic (e.g., saving the best model)
+        # Category mIoU is often a more robust metric for this.
+        self.trainer.comm_info["current_metric_value"] = cat_mIoU
+        self.trainer.comm_info["current_metric_name"] = "cat_mIoU"
+
+    def after_train(self):
+        # Log the best performing metric at the very end of training.
+        self.trainer.logger.info(
+            "Best {}: {:.4f}".format(
+                self.trainer.comm_info.get("current_metric_name", "metric"),
+                self.trainer.best_metric_value,
+            )
+        )
+
+
+@HOOKS.register_module()
+class PartNetEPartSegEvaluator(HookBase):
+    def __init__(self, num_parts=None, write_part_iou=False):
+        self.num_parts = sum(num_parts)
+        self.write_part_iou = write_part_iou
+
+    def before_train(self):
+        if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
+            wandb.define_metric("val/*", step_metric="Epoch")
+
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(
+            ">>>>>>>>>>>>>>>> Start Part Segmentation Evaluation >>>>>>>>>>>>>>>>"
+        )
+        self.trainer.model.eval()
+
+        # Initialize numpy arrays to aggregate results over the entire validation set.
+        num_categories = len(self.trainer.val_loader.dataset.categories)
+        total_iou_parts = torch.zeros(self.num_parts, device="cuda")
+        total_iou_count = torch.zeros(self.num_parts, device="cuda")
+
+        # Iterate over all batches in the validation loader
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            assert len(input_dict["offset"]) == 1
+            for key in input_dict.keys():
+                if isinstance(input_dict[key], torch.Tensor):
+                    input_dict[key] = input_dict[key].cuda(non_blocking=True)
+
+            with torch.no_grad():
+                output_dict = self.trainer.model(input_dict)
+
+            pred_scores = output_dict["seg_logits"]
+            segment = input_dict["segment"]
+            cls_token = input_dict["cls_token"][0].cpu().numpy()
+            category_name = self.trainer.val_loader.dataset.categories[cls_token]
+            parts_idx = self.trainer.val_loader.dataset.category2part[category_name]
+            pred_labels = torch.argmax(pred_scores, dim=-1)
+
+            if "inverse" in input_dict.keys():
+                assert (
+                    "origin_segment" in input_dict.keys()
+                ), "origin_segment must be provided with inverse"
+                pred_labels = pred_labels[input_dict["inverse"]]
+                segment = input_dict["origin_segment"]
+
+            for k, part_id in enumerate(parts_idx):
+                if k == 0:
+                    continue
+                if (segment == part_id).sum() == 0:
+                    continue
+                if (torch.sum(segment == part_id) == 0) and (
+                    torch.sum(pred_labels == part_id) == 0
+                ):
+                    continue
+                else:
+                    intersection = torch.sum(
+                        (segment == part_id) & (pred_labels == part_id)
+                    )
+                    union = torch.sum((segment == part_id) | (pred_labels == part_id))
+                    total_iou_parts[
+                        k + self.trainer.val_loader.dataset.num_part_offset[cls_token]
+                    ] += intersection / (union + 1e-10)
+                    total_iou_count[
+                        k + self.trainer.val_loader.dataset.num_part_offset[cls_token]
+                    ] += 1
+        if comm.get_world_size() > 1:
+            dist.all_reduce(total_iou_parts), dist.all_reduce(total_iou_count)
+        total_iou_count = total_iou_count.cpu().numpy()
+        total_iou_parts = total_iou_parts.cpu().numpy()
+        current_iou_count = total_iou_count[total_iou_count > 0]
+        current_iou_parts = total_iou_parts[total_iou_count > 0]
+        # part-wise mIoU: average of all sample mIoUs
+        part_mIoU = (current_iou_parts / current_iou_count).mean()
+
+        self.trainer.logger.info("Val result: part mIoU {:.4f}.".format(part_mIoU))
+
+        # Log detailed results for each category
+        for i in range(self.num_parts):
+            if total_iou_count[i] > 0:
+                self.trainer.logger.info(
+                    "Class_{idx}-{name} Result: iou_part/num_sample {iou_part:.4f}/{iou_count:.0f}".format(
+                        idx=i,
+                        name=self.trainer.val_loader.dataset.parts[i],
+                        iou_part=total_iou_parts[i] / total_iou_count[i],
+                        iou_count=total_iou_count[i],
+                    )
+                )
+
+        # Log metrics to TensorBoard / WandB
+        current_epoch = self.trainer.epoch + 1
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/part_mIoU", part_mIoU, current_epoch)
+            if self.trainer.cfg.enable_wandb:
+                wandb.log(
+                    {
+                        "Epoch": current_epoch,
+                        "val/part_mIoU": part_mIoU,
+                    },
+                    step=wandb.run.step,
+                )
+
+            if self.write_part_iou:
+                for i in range(self.num_parts):
+                    if total_iou_count[i] > 0:
+                        part_name = self.trainer.val_loader.dataset.parts[i]
+                        self.trainer.writer.add_scalar(
+                            f"val/part_{i}-{part_name}_IoU",
+                            total_iou_parts[i] / total_iou_count[i],
+                            current_epoch,
+                        )
+
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+
+        # Save the primary metric for checkpointing logic (e.g., saving the best model)
+        self.trainer.comm_info["current_metric_value"] = part_mIoU
+        self.trainer.comm_info["current_metric_name"] = "part_mIoU"
+
+    def after_train(self):
+        """
+        Log the best performing metric at the very end of training.
+        """
+        self.trainer.logger.info(
+            "Best {}: {:.4f}".format(
+                self.trainer.comm_info.get("current_metric_name", "metric"),
+                self.trainer.best_metric_value,
+            )
+        )
