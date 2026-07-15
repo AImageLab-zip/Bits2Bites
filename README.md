@@ -15,7 +15,7 @@
     <!-- /pypi-strip -->
 </p>
 
-[![Formatter](https://github.com/pointcept/pointcept/actions/workflows/formatter.yml/badge.svg)](https://github.com/pointcept/pointcept/actions/workflows/formatter.yml)
+This repository is a customized fork of [Pointcept](https://github.com/Pointcept/Pointcept) tailored for multi-task classification on 3D dental point cloud data. It includes several major extensions and changes that may affect the default behavior of Pointcept. We **recommend using this fork only to explore our implementation**.
 
 **Pointcept** is a powerful and flexible codebase for point cloud perception research. It is also an official implementation of the following paper:
 - 🚀 **Utonia: Toward One Encoder for All Point Clouds**  
@@ -34,35 +34,37 @@ Conference on Neural Information Processing Systems (**NeurIPS**) 2025
 IEEE Conference on Computer Vision and Pattern Recognition (**CVPR**) 2025 - Highlight  
 [ Pretrain ] [Sonata] - [ [Project](https://xywu.me/sonata/) ] [ [arXiv](https://arxiv.org/abs/2503.16429) ] [ [Bib](https://xywu.me/research/sonata/bib.txt) ] [ [Demo](https://github.com/facebookresearch/sonata) ] [ [Weight](https://huggingface.co/facebook/sonata) ] &rarr; [here](#sonata)
 
+We implemented:
 
-- **Point Transformer V3: Simpler, Faster, Stronger**  
-*Xiaoyang Wu, Li Jiang, Peng-Shuai Wang, Zhijian Liu, Xihui Liu, Yu Qiao, Wanli Ouyang, Tong He, Hengshuang Zhao*  
-IEEE Conference on Computer Vision and Pattern Recognition (**CVPR**) 2024 - Oral  
-[ Backbone ] [PTv3] - [ [arXiv](https://arxiv.org/abs/2312.10035) ] [ [Bib](https://xywu.me/research/ptv3/bib.txt) ] [ [Project](https://github.com/Pointcept/PointTransformerV3) ] &rarr; [here](https://github.com/Pointcept/PointTransformerV3)
+* ✅ **Custom model**: `MultiTaskClassifier` with multiple classification heads
+  → Located in: `pointcept/models/multi_task_classifier`
 
+* ✅ **Custom configs**
+  → Located in: `configs/`
 
-- **OA-CNNs: Omni-Adaptive Sparse CNNs for 3D Semantic Segmentation**  
-*Bohao Peng, Xiaoyang Wu, Li Jiang, Yukang Chen, Hengshuang Zhao, Zhuotao Tian, Jiaya Jia*  
-IEEE Conference on Computer Vision and Pattern Recognition (**CVPR**) 2024  
-[ Backbone ] [ OA-CNNs ] - [ [arXiv](https://arxiv.org/abs/2403.14418) ] [ [Bib](https://xywu.me/research/oacnns/bib.txt) ] &rarr; [here](#oa-cnns)
+* ✅ **Custom data loader** for the `Bits2Bites` dataset
+  → Located in: `pointcept/datasets/`
+  → Dataset info: [Bits2Bites Dataset](https://ditto.ing.unimore.it/bits2bites)
 
+* ✅ **Custom inference scripts**
+  → Located in: `tools/`
 
-- **Towards Large-scale 3D Representation Learning with Multi-dataset Point Prompt Training**  
-*Xiaoyang Wu, Zhuotao Tian, Xin Wen, Bohao Peng, Xihui Liu, Kaicheng Yu, Hengshuang Zhao*  
-IEEE Conference on Computer Vision and Pattern Recognition (**CVPR**) 2024  
-[ Pretrain ] [PPT] - [ [arXiv](https://arxiv.org/abs/2308.09718) ] [ [Bib](https://xywu.me/research/ppt/bib.txt) ] &rarr; [here](#point-prompt-training-ppt)
+* ✅ **Custom evaluation hook** for multi-task learning
+  → Located in: `pointcept/engines/hooks/evaluator`
 
+* ⚠️ **Additional modifications** to core components
+  → This may impact compatibility with upstream Pointcept. Please use this fork only for reproducing our results.
 
-- **Masked Scene Contrast: A Scalable Framework for Unsupervised 3D Representation Learning**  
-*Xiaoyang Wu, Xin Wen, Xihui Liu, Hengshuang Zhao*  
-IEEE Conference on Computer Vision and Pattern Recognition (**CVPR**) 2023  
-[ Pretrain ] [ MSC ] - [ [arXiv](https://arxiv.org/abs/2303.14191) ] [ [Bib](https://xywu.me/research/msc/bib.txt) ] &rarr; [here](#masked-scene-contrast-msc)
+## 📄 Citation & Paper
 
+This repository supports the methods described in our MICCAI 2025 paper:
+📝 *"Bits2Bites: Intra-oral Scans Occlusal Classification"*
+**Authors**: L. Borghi, L. Lumetti, et al.
+📍 To be presented at [ODIN - MICCAI 2025 – South Korea](https://odin-workshops.org)
+📄 [Paper](https://openreview.net/forum?id=6KfC6LkKF4)
+🖼️ [Poster](https://odin-workshops.org/2025/posters/bits2bites_occlusal_classification.pdf)
 
-- **Learning Context-aware Classifier for Semantic Segmentation** (3D Part)  
-*Zhuotao Tian, Jiequan Cui, Li Jiang, Xiaojuan Qi, Xin Lai, Yixin Chen, Shu Liu, Jiaya Jia*  
-AAAI Conference on Artificial Intelligence (**AAAI**) 2023 - Oral  
-[ SemSeg ] [ CAC ] - [ [arXiv](https://arxiv.org/abs/2303.11633) ] [ [Bib](https://xywu.me/research/cac/bib.txt) ] [ [2D Part](https://github.com/tianzhuotao/CAC) ] &rarr; [here](#context-aware-classifier)
+## 📦 Getting Started
 
 
 - **Point Transformer V2: Grouped Vector Attention and Partition-based Pooling**   

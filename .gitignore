@@ -5,6 +5,7 @@ __pycache__
 **/dist/
 *.so
 exp
+exp_*
 weights
 data
 *log*
@@ -16,3 +17,6 @@ outputs/
 Dockerfile
 *.out
 *.err
+pointcept-torch2.5.0-cu12.4
+debug_*
+pointcept-*

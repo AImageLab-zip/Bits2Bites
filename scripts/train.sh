@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 cd $(dirname $(dirname "$0")) || exit
 ROOT_DIR=$(pwd)
@@ -16,6 +16,7 @@ NUM_MACHINE=1
 DIST_URL="auto"
 DATA_ROOT="None"
 
+OPTIONS_LIST=()
 
 while getopts "p:d:c:n:w:g:m:r:e:" opt; do
   case $opt in
@@ -76,13 +77,11 @@ echo "Dist URL: $DIST_URL"
 EXP_DIR=exp/${DATASET}/${EXP_NAME}
 MODEL_DIR=${EXP_DIR}/model
 CODE_DIR=${EXP_DIR}/code
-CONFIG_DIR=configs/${DATASET}/${CONFIG}.py
-
+CONFIG_DIR=configs/dental/${CONFIG}
 
 echo " =========> CREATE EXP DIR <========="
 echo "Experiment dir: $ROOT_DIR/$EXP_DIR"
-if [ "${RESUME}" = true ] && [ -d "$EXP_DIR" ]
-then
+if [ "${RESUME}" = true ] && [ -d "$EXP_DIR" ]; then
   CONFIG_DIR=${EXP_DIR}/config.py
   WEIGHT=$MODEL_DIR/model_last.pth
 else
@@ -95,6 +94,18 @@ echo "Loading config in:" $CONFIG_DIR
 export PYTHONPATH=./$CODE_DIR
 echo "Running code in: $CODE_DIR"
 
+# Compose all options
+OPTION_ARGS=()
+OPTION_ARGS+=("save_path=$EXP_DIR")
+if [ "${RESUME}" = true ]; then
+  OPTION_ARGS+=("resume=$RESUME")
+  OPTION_ARGS+=("weight=$WEIGHT")
+fi
+
+# Add any extra -o key=value pairs
+for opt in "${OPTIONS_LIST[@]}"; do
+  OPTION_ARGS+=("$opt")
+done
 
 DATA_ROOT_OPTS=""
 if [ "${DATA_ROOT}" != "None" ]

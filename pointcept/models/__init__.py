@@ -25,6 +25,9 @@ from .multi_task_classifier import *
 from .point_group import *
 from .sgiformer import *
 
+# Custom Multi-Head Classifier
+from .multi_task_classifier import *
+
 # Pretraining
 from .masked_scene_contrast import *
 from .point_prompt_training import *

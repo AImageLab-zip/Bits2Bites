@@ -76,6 +76,10 @@ class IterationTimer(HookBase):
             self.trainer.storage.history("data_time").reset()
             self.trainer.storage.history("batch_time").reset()
 
+LABELS = ['classe_DX', 'classe_SX', 'morso_ant', 'trasversale', 'mediane']
+
+def _get_label_name(idx):
+    return LABELS[idx]
 
 @HOOKS.register_module()
 class InformationWriter(HookBase):
@@ -104,39 +108,39 @@ class InformationWriter(HookBase):
     def after_step(self):
         if "model_output_dict" in self.trainer.comm_info.keys():
             model_output_dict = self.trainer.comm_info["model_output_dict"]
-            self.model_output_keys = model_output_dict.keys()
-            for key in self.model_output_keys:
-                self.trainer.storage.put_scalar(key, model_output_dict[key].item())
+            # Filter only scalar tensor keys for logging
+            scalar_keys = []
+            for key, val in model_output_dict.items():
+                if isinstance(val, torch.Tensor) and val.ndim == 0:
+                    self.trainer.storage.put_scalar(key, val.item())
+                    scalar_keys.append(key)
+            self.model_output_keys = scalar_keys
 
+        # Log scalar history only
         for key in self.model_output_keys:
-            self.trainer.comm_info["iter_info"] += "{key}: {value:.4f} ".format(
-                key=key, value=self.trainer.storage.history(key).val
-            )
+            try:
+                val = self.trainer.storage.history(key).val
+                self.trainer.comm_info["iter_info"] += f"{key}: {val:.4f} "
+            except KeyError:
+                self.trainer.logger.warning(f"[InformationWriter] No history available for key '{key}'")
+
+        # Learning rate
         lr = self.trainer.optimizer.state_dict()["param_groups"][0]["lr"]
-        self.trainer.comm_info["iter_info"] += "Lr: {lr:.5f}".format(lr=lr)
+        self.trainer.comm_info["iter_info"] += f"Lr: {lr:.5f}"
         self.trainer.logger.info(self.trainer.comm_info["iter_info"])
-        self.trainer.comm_info["iter_info"] = ""  # reset iter info
+        self.trainer.comm_info["iter_info"] = ""
+
+        # TensorBoard + W&B
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("params/lr", lr, self.curr_iter)
             for key in self.model_output_keys:
                 self.trainer.writer.add_scalar(
-                    "train_batch/" + key,
-                    self.trainer.storage.history(key).val,
-                    self.curr_iter,
+                    f"train_batch/{key}", self.trainer.storage.history(key).val, self.curr_iter
                 )
             if self.trainer.cfg.enable_wandb:
-
-                wandb.log(
-                    {"Iter": self.curr_iter, "params/lr": lr}, step=self.curr_iter
-                )
+                wandb.log({"Iter": self.curr_iter, "params/lr": lr}, step=self.curr_iter)
                 for key in self.model_output_keys:
-                    wandb.log(
-                        {
-                            "Iter": self.curr_iter,
-                            f"train_batch/{key}": self.trainer.storage.history(key).val,
-                        },
-                        step=wandb.run.step,
-                    )
+                    wandb.log({f"train_batch/{key}": self.trainer.storage.history(key).val}, step=wandb.run.step)
 
     def after_epoch(self):
         epoch_info = "Train result: "
@@ -154,16 +158,21 @@ class InformationWriter(HookBase):
                 )
 
             if self.trainer.cfg.enable_wandb:
-
                 for key in self.model_output_keys:
+                    if key.startswith("loss_"):
+                        idx = int(key.split("_")[1])
+                        label_name = _get_label_name(idx)
+                        log_key = f"train/loss_{label_name}"
+                    else:
+                        log_key = f"train/{key}"
+
                     wandb.log(
                         {
                             "Epoch": self.trainer.epoch + 1,
-                            f"train/{key}": self.trainer.storage.history(key).avg,
+                            log_key: self.trainer.storage.history(key).avg,
                         },
                         step=wandb.run.step,
                     )
-
 
 @HOOKS.register_module()
 class CheckpointSaver(HookBase):

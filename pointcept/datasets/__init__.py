@@ -25,6 +25,9 @@ from .nuscenes import NuScenesDataset, NuScenesImagePointDataset
 from .waymo import WaymoDataset
 from .hk import HKDataset
 
+# Custom dental dataset
+from .dental import DentalDataset
+
 # object
 from .modelnet import ModelNetDataset
 from .shapenet_part import ShapeNetPartDataset
